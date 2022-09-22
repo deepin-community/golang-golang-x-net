@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+export DH_VERBOSE=1
+
+export DH_GOLANG_GO_GENERATE := 1
+
+# Exclude building the unused h2i binary to avoid circular dependency
+# with golang-golang-x-crypto-dev, and likewise for h2demo to avoid
+# many more dependencies.
+export DH_GOLANG_EXCLUDES := http2/h2i http2/h2demo
+
+%:
+	dh $@ --builddirectory=_build --buildsystem=golang --with=golang
+
+override_dh_auto_configure:
+	dh_auto_configure -O--buildsystem=golang
+	# Remove tests that depends on non-free RFC spec.
+	rm -v _build/src/golang.org/x/net/http2/*_test.go
+
+override_dh_auto_test:
+	# Some tests require root, need -short to skip them for now.
+	dh_auto_test -O--buildsystem=golang -- -short
+
+override_dh_gencontrol:
+	dh_gencontrol -v -- -Vmy:Built-Using="$(shell dpkg-query --show -f '$${source:Package} (=$${source:Version}),' publicsuffix)"
+
+execute_after_dh_auto_clean:
+	-git restore publicsuffix/table.go publicsuffix/table_test.go

@@ -1,0 +1,39 @@
+Last-Update: 2019-12-30, 2020-11-05
+Forwarded: not-needed
+Author: Dmitry Smirnov <onlyjob@debian.org>
+Description: avoid download on build time; use data from "publicsuffix" package.
+
+--- a/publicsuffix/gen.go
++++ b/publicsuffix/gen.go
+@@ -135,25 +135,20 @@
+ 	if *version == "" {
+ 		if *url != defaultURL {
+ 			return fmt.Errorf("-version was not specified, and the -url is not the default one")
+ 		}
+-		sha, date, err := gitCommit()
+-		if err != nil {
+-			return err
+-		}
+-		*version = fmt.Sprintf("publicsuffix.org's public_suffix_list.dat, git revision %s (%s)", sha, date)
++		*version = fmt.Sprintf("publicsuffix's public_suffix_list.dat")
+ 	}
+ 	var r io.Reader = os.Stdin
+ 	if *url != "" {
+-		res, err := http.Get(*url)
++		etd_fh, err := os.Open("/usr/share/publicsuffix/effective_tld_names.dat")
+ 		if err != nil {
+ 			return err
+ 		}
+-		if res.StatusCode != http.StatusOK {
+-			return fmt.Errorf("bad GET status for %s: %s", *url, res.Status)
+-		}
+-		r = res.Body
+-		defer res.Body.Close()
++		etd_data := new(bytes.Buffer)
++		etd_data.ReadFrom(etd_fh)
++		r = etd_data
++		defer etd_fh.Close()
+ 	}
+ 
+ 	var root node
+ 	icann := false
