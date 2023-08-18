@@ -1,33 +1,34 @@
 Source: golang-golang-x-net
+Section: golang
+Priority: optional
 Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
 Uploaders: Martín Ferrari <tincho@debian.org>,
            Michael Stapelberg <stapelberg@debian.org>,
            Tim Potter <tpot@hpe.com>,
            Anthony Fok <foka@debian.org>
-Section: golang
-Testsuite: autopkgtest-pkg-go
-Priority: optional
+Rules-Requires-Root: no
 Build-Depends: debhelper-compat (= 13),
-               dh-golang (>= 1.31~),
-               golang-any,
-               golang-golang-x-sys-dev (>= 0.0~git20210423.04245dc),
-               golang-golang-x-text-dev (>= 0.3.6),
+               dh-sequence-golang,
+               golang-any (>= 2:1.17~),
+               golang-golang-x-sys-dev (>= 0.8.0),
+               golang-golang-x-term-dev (>= 0.8.0),
+               golang-golang-x-text-dev (>= 0.9.0),
                publicsuffix,
-Standards-Version: 4.5.1
+Testsuite: autopkgtest-pkg-go
+Standards-Version: 4.6.2
 Vcs-Browser: https://salsa.debian.org/go-team/packages/golang-golang-x-net
 Vcs-Git: https://salsa.debian.org/go-team/packages/golang-golang-x-net.git
-Homepage: https://godoc.org/golang.org/x/net
-Rules-Requires-Root: no
+Homepage: https://golang.org/x/net
 XS-Go-Import-Path: golang.org/x/net
 
 Package: golang-golang-x-net-dev
 Architecture: all
 Multi-Arch: foreign
 Built-Using: ${my:Built-Using}
-Depends: golang-golang-x-sys-dev (>= 0.0~git20210423.04245dc),
-         golang-golang-x-text-dev (>= 0.3.6),
-         ${misc:Depends},
-         ${shlibs:Depends}
+Depends: golang-golang-x-sys-dev (>= 0.8.0),
+         golang-golang-x-term-dev (>= 0.8.0),
+         golang-golang-x-text-dev (>= 0.9.0),
+         ${misc:Depends}
 Description: Supplementary Go networking libraries
  Supplementary Go networking libraries (golang.org/x/net) not included in the
  main distribution:
@@ -65,5 +66,3 @@ Description: Supplementary Go networking libraries
    - webdav: Package webdav.
    - websocket: Package websocket implements a client and server for the
      WebSocket protocol as specified in RFC 6455.
- .
- This repository was previously available at https://code.google.com/p/go.net/

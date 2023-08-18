@@ -1,2 +1,10 @@
-# This is just a mention of the old repository in the description.
-golang-golang-x-net source: obsolete-url-in-packaging debian/control https://code.google.com/p/go.net/
+golang-golang-x-net source: source-is-missing [html/charset/testdata/HTTP-charset.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/HTTP-vs-UTF-8-BOM.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/HTTP-vs-meta-charset.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/HTTP-vs-meta-content.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/UTF-16BE-BOM.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/UTF-16LE-BOM.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/UTF-8-BOM-vs-meta-charset.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/UTF-8-BOM-vs-meta-content.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/meta-charset-attribute.html]
+golang-golang-x-net source: source-is-missing [html/charset/testdata/meta-content-attribute.html]

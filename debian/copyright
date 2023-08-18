@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: golang.org/x/net
 Source: https://go.googlesource.com/net/
 Comment: https://github.com/golang/net
+Upstream-Name: golang.org/x/net
 Files-Excluded: http2/testdata/draft-ietf-httpbis-http2.xml
 
 Files: *
