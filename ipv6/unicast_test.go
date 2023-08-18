@@ -6,6 +6,7 @@ package ipv6_test
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"os"
 	"runtime"
@@ -20,11 +21,11 @@ import (
 
 func TestPacketConnReadWriteUnicastUDP(t *testing.T) {
 	switch runtime.GOOS {
-	case "fuchsia", "hurd", "js", "nacl", "plan9", "windows":
+	case "fuchsia", "hurd", "js", "nacl", "plan9", "wasip1", "windows":
 		t.Skipf("not supported on %s", runtime.GOOS)
 	}
-	if !nettest.SupportsIPv6() {
-		t.Skip("ipv6 is not supported")
+	if _, err := nettest.RoutedInterface("ip6", net.FlagUp|net.FlagLoopback); err != nil {
+		t.Skip("ipv6 is not enabled for loopback interface")
 	}
 
 	c, err := nettest.NewLocalPacketListener("udp6")
@@ -59,11 +60,24 @@ func TestPacketConnReadWriteUnicastUDP(t *testing.T) {
 		if err := p.SetWriteDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := p.WriteTo(wb, &cm, dst); err != nil {
-			t.Fatal(err)
-		} else if n != len(wb) {
-			t.Fatalf("got %v; want %v", n, len(wb))
+
+		backoff := time.Millisecond
+		for {
+			n, err := p.WriteTo(wb, &cm, dst)
+			if err != nil {
+				if n == 0 && isENOBUFS(err) {
+					time.Sleep(backoff)
+					backoff *= 2
+					continue
+				}
+				t.Fatal(err)
+			}
+			if n != len(wb) {
+				t.Fatalf("got %d; want %d", n, len(wb))
+			}
+			break
 		}
+
 		rb := make([]byte, 128)
 		if err := p.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
 			t.Fatal(err)
@@ -77,10 +91,6 @@ func TestPacketConnReadWriteUnicastUDP(t *testing.T) {
 }
 
 func TestPacketConnReadWriteUnicastICMP(t *testing.T) {
-	switch runtime.GOOS {
-	case "fuchsia", "hurd", "js", "nacl", "plan9", "windows", "zos":
-		t.Skipf("not supported on %s", runtime.GOOS)
-	}
 	if !nettest.SupportsIPv6() {
 		t.Skip("ipv6 is not supported")
 	}
@@ -115,7 +125,9 @@ func TestPacketConnReadWriteUnicastICMP(t *testing.T) {
 	var f ipv6.ICMPFilter
 	f.SetAll(true)
 	f.Accept(ipv6.ICMPTypeEchoReply)
-	if err := p.SetICMPFilter(&f); err != nil {
+	if err := p.SetICMPFilter(&f); errors.Is(err, ipv6.ErrNotImplemented) {
+		t.Skipf("setting ICMP filter not supported: %v", err)
+	} else if err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,21 +171,29 @@ func TestPacketConnReadWriteUnicastICMP(t *testing.T) {
 		if err := p.SetWriteDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := p.WriteTo(wb, &cm, dst); err != nil {
-			t.Fatal(err)
-		} else if n != len(wb) {
-			t.Fatalf("got %v; want %v", n, len(wb))
+
+		backoff := time.Millisecond
+		for {
+			n, err := p.WriteTo(wb, &cm, dst)
+			if err != nil {
+				if n == 0 && isENOBUFS(err) {
+					time.Sleep(backoff)
+					backoff *= 2
+					continue
+				}
+				t.Fatal(err)
+			}
+			if n != len(wb) {
+				t.Fatalf("got %d; want %d", n, len(wb))
+			}
+			break
 		}
+
 		rb := make([]byte, 128)
 		if err := p.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
 			t.Fatal(err)
 		}
 		if n, _, _, err := p.ReadFrom(rb); err != nil {
-			switch runtime.GOOS {
-			case "darwin", "ios": // older darwin kernels have some limitation on receiving icmp packet through raw socket
-				t.Logf("not supported on %s", runtime.GOOS)
-				continue
-			}
 			t.Fatal(err)
 		} else {
 			if m, err := icmp.ParseMessage(iana.ProtocolIPv6ICMP, rb[:n]); err != nil {

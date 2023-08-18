@@ -1,22 +1,21 @@
 #!/usr/bin/make -f
 # -*- makefile -*-
 
-export DH_VERBOSE=1
-
+# Regenerate publicsuffix table
 export DH_GOLANG_GO_GENERATE := 1
 
-# Exclude building the unused h2i binary to avoid circular dependency
-# with golang-golang-x-crypto-dev, and likewise for h2demo to avoid
-# many more dependencies.
-export DH_GOLANG_EXCLUDES := http2/h2i http2/h2demo
+# http2/h2i is cli tool
+export DH_GOLANG_EXCLUDES := http2/h2i
 
 %:
-	dh $@ --builddirectory=_build --buildsystem=golang --with=golang
+	dh $@ --builddirectory=_build --buildsystem=golang
 
-override_dh_auto_configure:
-	dh_auto_configure -O--buildsystem=golang
+execute_after_dh_auto_configure:
 	# Remove tests that depends on non-free RFC spec.
-	rm -v _build/src/golang.org/x/net/http2/*_test.go
+	printf 'package http2\nfunc covers(string, string) {}' > _build/src/golang.org/x/net/http2/z_spec_test.go
+	# Placeholder for generated file, needed by go:embed
+	mkdir -p _build/src/golang.org/x/net/publicsuffix/data/
+	touch $(addprefix _build/src/golang.org/x/net/publicsuffix/data/,children nodes text)
 
 override_dh_auto_test:
 	# Some tests require root, need -short to skip them for now.
@@ -24,6 +23,3 @@ override_dh_auto_test:
 
 override_dh_gencontrol:
 	dh_gencontrol -v -- -Vmy:Built-Using="$(shell dpkg-query --show -f '$${source:Package} (=$${source:Version}),' publicsuffix)"
-
-execute_after_dh_auto_clean:
-	-git restore publicsuffix/table.go publicsuffix/table_test.go
