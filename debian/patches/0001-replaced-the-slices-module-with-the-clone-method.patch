@@ -1,0 +1,39 @@
+From 706a5ce2eb39d99cf3d9fad779363545667a3eac Mon Sep 17 00:00:00 2001
+From: xzl <xiangzelong@deepin.org>
+Date: Sat, 1 Jun 2024 16:03:04 +0800
+Subject: [PATCH 1/1] replaced the slices module with the clone method
+
+---
+ http2/clientconn_test.go | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/http2/clientconn_test.go b/http2/clientconn_test.go
+index 4237b14..75e8b5c 100644
+--- a/http2/clientconn_test.go
++++ b/http2/clientconn_test.go
+@@ -14,7 +14,6 @@ import (
+ 	"net"
+ 	"net/http"
+ 	"reflect"
+-	"slices"
+ 	"testing"
+ 	"time"
+ 
+@@ -232,9 +231,13 @@ func (tc *testClientConn) wantFrameType(want FrameType) {
+ //			return f.StreamEnded()
+ //		},
+ //	)
++func Clone[S ~[]E, E any](s S) S {
++	// The s[:0:0] preserves nil in case it matters.
++	return append(s[:0:0], s...)
++}
+ func (tc *testClientConn) wantUnorderedFrames(want ...any) {
+ 	tc.t.Helper()
+-	want = slices.Clone(want)
++	want = Clone(want)
+ 	seen := 0
+ frame:
+ 	for seen < len(want) && !tc.t.Failed() {
+-- 
+2.43.4
+
