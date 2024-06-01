@@ -20,13 +20,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -146,6 +144,12 @@ func newServerTester(t testing.TB, handler http.HandlerFunc, opts ...interface{}
 	}
 
 	ConfigureServer(ts.Config, h2server)
+
+	// Go 1.22 changes the default minimum TLS version to TLS 1.2,
+	// in order to properly test cases where we want to reject low
+	// TLS versions, we need to explicitly configure the minimum
+	// version here.
+	ts.Config.TLSConfig.MinVersion = tls.VersionTLS10
 
 	st := &serverTester{
 		t:  t,
@@ -2704,96 +2708,6 @@ func readBodyHandler(t *testing.T, want string) func(w http.ResponseWriter, r *h
 	}
 }
 
-// TestServerWithCurl currently fails, hence the LenientCipherSuites test. See:
-//
-//	https://github.com/tatsuhiro-t/nghttp2/issues/140 &
-//	http://sourceforge.net/p/curl/bugs/1472/
-func TestServerWithCurl(t *testing.T)                     { testServerWithCurl(t, false) }
-func TestServerWithCurl_LenientCipherSuites(t *testing.T) { testServerWithCurl(t, true) }
-
-func testServerWithCurl(t *testing.T, permitProhibitedCipherSuites bool) {
-	if runtime.GOOS != "linux" {
-		t.Skip("skipping Docker test when not on Linux; requires --net which won't work with boot2docker anyway")
-	}
-	if testing.Short() {
-		t.Skip("skipping curl test in short mode")
-	}
-	requireCurl(t)
-	var gotConn int32
-	testHookOnConn = func() { atomic.StoreInt32(&gotConn, 1) }
-
-	const msg = "Hello from curl!\n"
-	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Foo", "Bar")
-		w.Header().Set("Client-Proto", r.Proto)
-		io.WriteString(w, msg)
-	}))
-	ConfigureServer(ts.Config, &Server{
-		PermitProhibitedCipherSuites: permitProhibitedCipherSuites,
-	})
-	ts.TLS = ts.Config.TLSConfig // the httptest.Server has its own copy of this TLS config
-	ts.StartTLS()
-	defer ts.Close()
-
-	t.Logf("Running test server for curl to hit at: %s", ts.URL)
-	container := curl(t, "--silent", "--http2", "--insecure", "-v", ts.URL)
-	defer kill(container)
-	res, err := dockerLogs(container)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	body := string(res)
-	// Search for both "key: value" and "key:value", since curl changed their format
-	// Our Dockerfile contains the latest version (no space), but just in case people
-	// didn't rebuild, check both.
-	if !strings.Contains(body, "foo: Bar") && !strings.Contains(body, "foo:Bar") {
-		t.Errorf("didn't see foo: Bar header")
-		t.Logf("Got: %s", body)
-	}
-	if !strings.Contains(body, "client-proto: HTTP/2") && !strings.Contains(body, "client-proto:HTTP/2") {
-		t.Errorf("didn't see client-proto: HTTP/2 header")
-		t.Logf("Got: %s", res)
-	}
-	if !strings.Contains(string(res), msg) {
-		t.Errorf("didn't see %q content", msg)
-		t.Logf("Got: %s", res)
-	}
-
-	if atomic.LoadInt32(&gotConn) == 0 {
-		t.Error("never saw an http2 connection")
-	}
-}
-
-var doh2load = flag.Bool("h2load", false, "Run h2load test")
-
-func TestServerWithH2Load(t *testing.T) {
-	if !*doh2load {
-		t.Skip("Skipping without --h2load flag.")
-	}
-	if runtime.GOOS != "linux" {
-		t.Skip("skipping Docker test when not on Linux; requires --net which won't work with boot2docker anyway")
-	}
-	requireH2load(t)
-
-	msg := strings.Repeat("Hello, h2load!\n", 5000)
-	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, msg)
-		w.(http.Flusher).Flush()
-		io.WriteString(w, msg)
-	}))
-	ts.StartTLS()
-	defer ts.Close()
-
-	cmd := exec.Command("docker", "run", "--net=host", "--entrypoint=/usr/local/bin/h2load", "gohttp2/curl",
-		"-n100000", "-c100", "-m100", ts.URL)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestServer_MaxDecoderHeaderTableSize(t *testing.T) {
 	wantHeaderTableSize := uint32(initialHeaderTableSize * 2)
 	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {}, func(s *Server) {
@@ -3549,6 +3463,30 @@ func TestServerNoDuplicateContentType(t *testing.T) {
 		{":status", "200"},
 		{"content-type", ""},
 		{"content-length", "41"},
+	}
+	if !reflect.DeepEqual(headers, want) {
+		t.Errorf("Headers mismatch.\n got: %q\nwant: %q\n", headers, want)
+	}
+}
+
+func TestServerContentLengthCanBeDisabled(t *testing.T) {
+	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Content-Length"] = nil
+		fmt.Fprintf(w, "OK")
+	})
+	defer st.Close()
+	st.greet()
+	st.writeHeaders(HeadersFrameParam{
+		StreamID:      1,
+		BlockFragment: st.encodeHeader(),
+		EndStream:     true,
+		EndHeaders:    true,
+	})
+	h := st.wantHeaders()
+	headers := st.decodeHeader(h.HeaderBlockFragment())
+	want := [][2]string{
+		{":status", "200"},
+		{"content-type", "text/plain; charset=utf-8"},
 	}
 	if !reflect.DeepEqual(headers, want) {
 		t.Errorf("Headers mismatch.\n got: %q\nwant: %q\n", headers, want)
@@ -4640,13 +4578,16 @@ func TestCanonicalHeaderCacheGrowth(t *testing.T) {
 		sc := &serverConn{
 			serveG: newGoroutineLock(),
 		}
-		const count = 1000
-		for i := 0; i < count; i++ {
-			h := fmt.Sprintf("%v-%v", base, i)
+		count := 0
+		added := 0
+		for added < 10*maxCachedCanonicalHeadersKeysSize {
+			h := fmt.Sprintf("%v-%v", base, count)
 			c := sc.canonicalHeader(h)
 			if len(h) != len(c) {
 				t.Errorf("sc.canonicalHeader(%q) = %q, want same length", h, c)
 			}
+			count++
+			added += len(h)
 		}
 		total := 0
 		for k, v := range sc.canonHeader {
@@ -4731,4 +4672,211 @@ func TestServerWriteDoesNotRetainBufferAfterServerClose(t *testing.T) {
 	<-donec
 	st.ts.Config.Close()
 	<-donec
+}
+
+func TestServerMaxHandlerGoroutines(t *testing.T) {
+	const maxHandlers = 10
+	handlerc := make(chan chan bool)
+	donec := make(chan struct{})
+	defer close(donec)
+	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
+		stopc := make(chan bool, 1)
+		select {
+		case handlerc <- stopc:
+		case <-donec:
+		}
+		select {
+		case shouldPanic := <-stopc:
+			if shouldPanic {
+				panic(http.ErrAbortHandler)
+			}
+		case <-donec:
+		}
+	}, func(s *Server) {
+		s.MaxConcurrentStreams = maxHandlers
+	})
+	defer st.Close()
+
+	st.writePreface()
+	st.writeInitialSettings()
+	st.writeSettingsAck()
+
+	// Make maxHandlers concurrent requests.
+	// Reset them all, but only after the handler goroutines have started.
+	var stops []chan bool
+	streamID := uint32(1)
+	for i := 0; i < maxHandlers; i++ {
+		st.writeHeaders(HeadersFrameParam{
+			StreamID:      streamID,
+			BlockFragment: st.encodeHeader(),
+			EndStream:     true,
+			EndHeaders:    true,
+		})
+		stops = append(stops, <-handlerc)
+		st.fr.WriteRSTStream(streamID, ErrCodeCancel)
+		streamID += 2
+	}
+
+	// Start another request, and immediately reset it.
+	st.writeHeaders(HeadersFrameParam{
+		StreamID:      streamID,
+		BlockFragment: st.encodeHeader(),
+		EndStream:     true,
+		EndHeaders:    true,
+	})
+	st.fr.WriteRSTStream(streamID, ErrCodeCancel)
+	streamID += 2
+
+	// Start another two requests. Don't reset these.
+	for i := 0; i < 2; i++ {
+		st.writeHeaders(HeadersFrameParam{
+			StreamID:      streamID,
+			BlockFragment: st.encodeHeader(),
+			EndStream:     true,
+			EndHeaders:    true,
+		})
+		streamID += 2
+	}
+
+	// The initial maxHandlers handlers are still executing,
+	// so the last two requests don't start any new handlers.
+	select {
+	case <-handlerc:
+		t.Errorf("handler unexpectedly started while maxHandlers are already running")
+	case <-time.After(1 * time.Millisecond):
+	}
+
+	// Tell two handlers to exit.
+	// The pending requests which weren't reset start handlers.
+	stops[0] <- false // normal exit
+	stops[1] <- true  // panic
+	stops = stops[2:]
+	stops = append(stops, <-handlerc)
+	stops = append(stops, <-handlerc)
+
+	// Make a bunch more requests.
+	// Eventually, the server tells us to go away.
+	for i := 0; i < 5*maxHandlers; i++ {
+		st.writeHeaders(HeadersFrameParam{
+			StreamID:      streamID,
+			BlockFragment: st.encodeHeader(),
+			EndStream:     true,
+			EndHeaders:    true,
+		})
+		st.fr.WriteRSTStream(streamID, ErrCodeCancel)
+		streamID += 2
+	}
+Frames:
+	for {
+		f, err := st.readFrame()
+		if err != nil {
+			st.t.Fatal(err)
+		}
+		switch f := f.(type) {
+		case *GoAwayFrame:
+			if f.ErrCode != ErrCodeEnhanceYourCalm {
+				t.Errorf("err code = %v; want %v", f.ErrCode, ErrCodeEnhanceYourCalm)
+			}
+			break Frames
+		default:
+		}
+	}
+
+	for _, s := range stops {
+		close(s)
+	}
+}
+
+func TestServerContinuationFlood(t *testing.T) {
+	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println(r.Header)
+	}, func(ts *httptest.Server) {
+		ts.Config.MaxHeaderBytes = 4096
+	})
+	defer st.Close()
+
+	st.writePreface()
+	st.writeInitialSettings()
+	st.writeSettingsAck()
+
+	st.writeHeaders(HeadersFrameParam{
+		StreamID:      1,
+		BlockFragment: st.encodeHeader(),
+		EndStream:     true,
+	})
+	for i := 0; i < 1000; i++ {
+		st.fr.WriteContinuation(1, false, st.encodeHeaderRaw(
+			fmt.Sprintf("x-%v", i), "1234567890",
+		))
+	}
+	st.fr.WriteContinuation(1, true, st.encodeHeaderRaw(
+		"x-last-header", "1",
+	))
+
+	for {
+		f, err := st.readFrame()
+		if err != nil {
+			break
+		}
+		switch f := f.(type) {
+		case *HeadersFrame:
+			t.Fatalf("received HEADERS frame; want GOAWAY and a closed connection")
+		case *GoAwayFrame:
+			// We might not see the GOAWAY (see below), but if we do it should
+			// indicate that the server processed this request so the client doesn't
+			// attempt to retry it.
+			if got, want := f.LastStreamID, uint32(1); got != want {
+				t.Errorf("received GOAWAY with LastStreamId %v, want %v", got, want)
+			}
+
+		}
+	}
+	// We expect to have seen a GOAWAY before the connection closes,
+	// but the server will close the connection after one second
+	// whether or not it has finished sending the GOAWAY. On windows-amd64-race
+	// builders, this fairly consistently results in the connection closing without
+	// the GOAWAY being sent.
+	//
+	// Since the server's behavior is inherently racy here and the important thing
+	// is that the connection is closed, don't check for the GOAWAY having been sent.
+}
+
+func TestServerContinuationAfterInvalidHeader(t *testing.T) {
+	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println(r.Header)
+	})
+	defer st.Close()
+
+	st.writePreface()
+	st.writeInitialSettings()
+	st.writeSettingsAck()
+
+	st.writeHeaders(HeadersFrameParam{
+		StreamID:      1,
+		BlockFragment: st.encodeHeader(),
+		EndStream:     true,
+	})
+	st.fr.WriteContinuation(1, false, st.encodeHeaderRaw(
+		"x-invalid-header", "\x00",
+	))
+	st.fr.WriteContinuation(1, true, st.encodeHeaderRaw(
+		"x-valid-header", "1",
+	))
+
+	var sawGoAway bool
+	for {
+		f, err := st.readFrame()
+		if err != nil {
+			break
+		}
+		switch f.(type) {
+		case *GoAwayFrame:
+			sawGoAway = true
+		case *HeadersFrame:
+			t.Fatalf("received HEADERS frame; want GOAWAY")
+		}
+	}
+	if !sawGoAway {
+		t.Errorf("connection closed with no GOAWAY frame; want one")
+	}
 }

@@ -590,6 +590,32 @@ var tokenTests = []tokenTest{
 		`<p id=can't><p id=won't>`,
 		`<p id="can&#39;t">$<p id="won&#39;t">`,
 	},
+	// WHATWG 13.2.5.32 equals sign before attribute name state
+	{
+		"equals sign before attribute name",
+		`<p  =>`,
+		`<p =="">`,
+	},
+	{
+		"equals sign before attribute name, extra cruft",
+		`<p  =asd>`,
+		`<p =asd="">`,
+	},
+	{
+		"forward slash before attribute name",
+		`<p/=">`,
+		`<p ="="">`,
+	},
+	{
+		"forward slash before attribute name with spaces around",
+		`<p / =">`,
+		`<p ="="">`,
+	},
+	{
+		"forward slash after attribute name followed by a character",
+		`<p a/ ="">`,
+		`<p a="" =""="">`,
+	},
 }
 
 func TestTokenizer(t *testing.T) {
