@@ -4,8 +4,8 @@
 # Regenerate publicsuffix table
 export DH_GOLANG_GO_GENERATE := 1
 
-# http2/h2i is cli tool
-export DH_GOLANG_EXCLUDES := http2/h2i
+# http2/h2i and internal/quic/cmd/interop are CLI tools
+export DH_GOLANG_EXCLUDES := http2/h2i internal/quic/cmd
 
 %:
 	dh $@ --builddirectory=_build --buildsystem=golang

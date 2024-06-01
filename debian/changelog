@@ -1,3 +1,102 @@
+golang-golang-x-net (1:0.25.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.25.0+dfsg
+  * Bump versioned dependencies as per go.mod
+
+ -- Anthony Fok <foka@debian.org>  Mon, 20 May 2024 18:50:52 -0600
+
+golang-golang-x-net (1:0.24.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.24.0+dfsg
+  * Bump versioned dependencies as per go.mod
+  * Bump Standards-Version to 4.7.0 (no change)
+
+ -- Anthony Fok <foka@debian.org>  Fri, 26 Apr 2024 03:23:13 -0600
+
+golang-golang-x-net (1:0.23.0+dfsg-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream version 0.23.0+dfsg
+    + CVE-2023-45288: http2: close connections when receiving too many headers
+
+ -- Shengjing Zhu <zhsj@debian.org>  Thu, 04 Apr 2024 04:38:02 +0800
+
+golang-golang-x-net (1:0.22.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.22.0+dfsg
+  * Bump versioned dependencies as per go.mod
+
+ -- Anthony Fok <foka@debian.org>  Sun, 24 Mar 2024 18:00:05 -0600
+
+golang-golang-x-net (1:0.21.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.21.0+dfsg
+  * Bump versioned dependencies as per go.mod
+
+ -- Anthony Fok <foka@debian.org>  Fri, 23 Feb 2024 19:31:07 -0700
+
+golang-golang-x-net (1:0.20.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.20.0+dfsg
+  * Bump versioned dependencies as per go.mod
+
+ -- Anthony Fok <foka@debian.org>  Mon, 29 Jan 2024 14:52:43 -0700
+
+golang-golang-x-net (1:0.19.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.19.0
+  * Bump versioned dependencies as per go.mod
+  * Append internal/quic/cmd to DH_GOLANG_EXCLUDES
+    to avoid building the new QUIC interop test runner
+
+ -- Anthony Fok <foka@debian.org>  Fri, 08 Dec 2023 15:15:47 -0700
+
+golang-golang-x-net (1:0.17.0+dfsg-1) unstable; urgency=medium
+
+  * New upstream version 0.17.0
+  * Bump versioned dependencies as per go.mod
+
+ -- Anthony Fok <foka@debian.org>  Wed, 01 Nov 2023 02:21:21 -0600
+
+golang-golang-x-net (1:0.15.0-2) unstable; urgency=medium
+
+  * Bump build-dependency publicsuffix (>= 20230804.1533)
+    as golang.org/x/net v0.15.0 updated its copy of publicsuffix, especially
+    "New policy for .museum, without all the SLD (Second-Level Domains)".
+    (Sorry for my inadvertent and premature upload of 1:0.15.0-1!)
+  * v0.13.0 fixes CVE-2023-3978: "x/net/html: text nodes outside of the
+    HTML namespace improperly rendered"; see https://go.dev/issue/61615 and
+    https://github.com/golang/net/commit/8ffa475fbdb33da97e8bf79cc5791ee8751fca5e
+    (Closes: #1043163)
+
+ -- Anthony Fok <foka@debian.org>  Thu, 12 Oct 2023 12:49:47 -0600
+
+golang-golang-x-net (1:0.15.0-1) unstable; urgency=medium
+
+  * New upstream version 0.15.0
+  * Bump versioned dependencies as per go.mod
+  * Remove 0001-quic-fix-testConn.uncheckedHandshake.patch
+    which was backported from this version
+
+ -- Anthony Fok <foka@debian.org>  Thu, 12 Oct 2023 01:36:09 -0600
+
+golang-golang-x-net (1:0.14.0-1) unstable; urgency=medium
+
+  * New upstream version 0.14.0
+  * Bump versioned dependencies as per go.mod
+  * Backport "quic: fix testConn.uncheckedHandshake" from v0.15.0
+
+ -- Anthony Fok <foka@debian.org>  Tue, 10 Oct 2023 05:59:28 -0600
+
+golang-golang-x-net (1:0.11.0-1) unstable; urgency=medium
+
+  * New upstream version 0.11.0
+  * Bump versioned dependencies as per go.mod, with new dependency on
+    golang-golang-x-crypto-dev (>= 0.10.0), which no longer depends on
+    golang-golang-x-net-dev, hence no circular dependency.
+
+ -- Anthony Fok <foka@debian.org>  Thu, 21 Sep 2023 05:09:07 -0600
+
 golang-golang-x-net (1:0.10.0-1) unstable; urgency=medium
 
   * New upstream version 0.10.0
