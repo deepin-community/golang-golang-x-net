@@ -2,3 +2,4 @@ publicsuffix.patch
 skip-publicsuffix-tests.patch
 0003-html-properly-handle-trailing-solidus-in-unquoted-at.patch
 0004-html-use-strings.EqualFold-instead-of-lowering-ourse.patch
+0005-feat-add-sw-support.patch

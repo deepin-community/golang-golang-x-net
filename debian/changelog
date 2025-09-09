@@ -1,3 +1,10 @@
+golang-golang-x-net (1:0.27.0-2deepin1) unstable; urgency=medium
+
+  [ hudeng ]
+  * add sw support
+
+ -- Tianyu Chen <sweetyfish@deepin.org>  Tue, 09 Sep 2025 17:17:53 +0800
+
 golang-golang-x-net (1:0.27.0-2) unstable; urgency=medium
 
   * Team upload.
