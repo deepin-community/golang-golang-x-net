@@ -1,3 +1,5 @@
 publicsuffix.patch
-0001-replaced-the-slices-module-with-the-clone-method.patch
-0001-feat-add-sw-support.patch
+skip-publicsuffix-tests.patch
+0003-html-properly-handle-trailing-solidus-in-unquoted-at.patch
+0004-html-use-strings.EqualFold-instead-of-lowering-ourse.patch
+0005-feat-add-sw-support.patch

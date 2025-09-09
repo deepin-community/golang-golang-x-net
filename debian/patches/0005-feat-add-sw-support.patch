@@ -1,16 +1,15 @@
-From 2cf91533d1d89ee4f948091467e810e23b89e3f7 Mon Sep 17 00:00:00 2001
 From: hudeng <hudeng@deepin.org>
 Date: Mon, 16 Dec 2024 02:53:32 +0000
-Subject: [PATCH] feat: add sw support
+Subject: feat: add sw support
 
 ---
  internal/socket/cmsghdr_linux_64bit.go |  2 +-
  internal/socket/iovec_64bit.go         |  2 +-
  internal/socket/msghdr_linux_64bit.go  |  2 +-
- internal/socket/sys_linux_sw64.go      | 12 +++++
- internal/socket/zsys_linux_sw64.go     | 39 ++++++++++++++
- ipv4/zsys_linux_sw64.go                | 75 ++++++++++++++++++++++++++
- ipv6/zsys_linux_sw64.go                | 75 ++++++++++++++++++++++++++
+ internal/socket/sys_linux_sw64.go      | 12 ++++++
+ internal/socket/zsys_linux_sw64.go     | 39 ++++++++++++++++++
+ ipv4/zsys_linux_sw64.go                | 75 ++++++++++++++++++++++++++++++++++
+ ipv6/zsys_linux_sw64.go                | 75 ++++++++++++++++++++++++++++++++++
  7 files changed, 204 insertions(+), 3 deletions(-)
  create mode 100644 internal/socket/sys_linux_sw64.go
  create mode 100644 internal/socket/zsys_linux_sw64.go
@@ -281,6 +280,3 @@ index 0000000..84c1aab
 +type icmpv6Filter struct {
 +	Data [8]uint32
 +}
--- 
-2.33.0
-
