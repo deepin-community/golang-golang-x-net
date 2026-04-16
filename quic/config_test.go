@@ -2,13 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
-import "testing"
+import (
+	"testing"
+	"testing/synctest"
+)
 
 func TestConfigTransportParameters(t *testing.T) {
+	synctest.Test(t, testConfigTransportParameters)
+}
+func testConfigTransportParameters(t *testing.T) {
 	const (
 		wantInitialMaxData        = int64(1)
 		wantInitialMaxStreamData  = int64(2)

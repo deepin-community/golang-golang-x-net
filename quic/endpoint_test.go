@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -13,14 +11,25 @@ import (
 	"io"
 	"log/slog"
 	"net/netip"
+	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"golang.org/x/net/quic/qlog"
 )
 
 func TestConnect(t *testing.T) {
 	newLocalConnPair(t, &Config{}, &Config{})
+}
+
+func TestConnectRetry(t *testing.T) {
+	newLocalConnPair(t, &Config{RequireAddressValidation: true}, &Config{})
+}
+
+func TestConnectDefaultTLSConfig(t *testing.T) {
+	serverConfig := newTestTLSConfigWithMoreDefaults(serverSide)
+	clientConfig := newTestTLSConfigWithMoreDefaults(clientSide)
+	newLocalConnPair(t, &Config{TLSConfig: serverConfig}, &Config{TLSConfig: clientConfig})
 }
 
 func TestStreamTransfer(t *testing.T) {
@@ -113,22 +122,22 @@ func makeTestConfig(conf *Config, side connSide) *Config {
 type testEndpoint struct {
 	t                     *testing.T
 	e                     *Endpoint
-	now                   time.Time
 	recvc                 chan *datagram
 	idlec                 chan struct{}
 	conns                 map[*Conn]*testConn
 	acceptQueue           []*testConn
 	configTransportParams []func(*transportParameters)
 	configTestConn        []func(*testConn)
-	sentDatagrams         [][]byte
 	peerTLSConn           *tls.QUICConn
 	lastInitialDstConnID  []byte // for parsing Retry packets
+
+	sentDatagramsMu sync.Mutex
+	sentDatagrams   [][]byte
 }
 
 func newTestEndpoint(t *testing.T, config *Config) *testEndpoint {
 	te := &testEndpoint{
 		t:     t,
-		now:   time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
 		recvc: make(chan *datagram),
 		idlec: make(chan struct{}),
 		conns: make(map[*Conn]*testConn),
@@ -146,16 +155,6 @@ func (te *testEndpoint) cleanup() {
 	te.e.Close(canceledContext())
 }
 
-func (te *testEndpoint) wait() {
-	select {
-	case te.idlec <- struct{}{}:
-	case <-te.e.closec:
-	}
-	for _, tc := range te.conns {
-		tc.wait()
-	}
-}
-
 // accept returns a server connection from the endpoint.
 // Unlike Endpoint.Accept, connections are available as soon as they are created.
 func (te *testEndpoint) accept() *testConn {
@@ -169,7 +168,7 @@ func (te *testEndpoint) accept() *testConn {
 
 func (te *testEndpoint) write(d *datagram) {
 	te.recvc <- d
-	te.wait()
+	synctest.Wait()
 }
 
 var testClientAddr = netip.MustParseAddrPort("10.0.0.1:8000")
@@ -228,7 +227,9 @@ func (te *testEndpoint) connForSource(srcConnID []byte) *testConn {
 
 func (te *testEndpoint) read() []byte {
 	te.t.Helper()
-	te.wait()
+	synctest.Wait()
+	te.sentDatagramsMu.Lock()
+	defer te.sentDatagramsMu.Unlock()
 	if len(te.sentDatagrams) == 0 {
 		return nil
 	}
@@ -266,33 +267,8 @@ func (te *testEndpoint) wantIdle(expectation string) {
 	}
 }
 
-// advance causes time to pass.
-func (te *testEndpoint) advance(d time.Duration) {
-	te.t.Helper()
-	te.advanceTo(te.now.Add(d))
-}
-
-// advanceTo sets the current time.
-func (te *testEndpoint) advanceTo(now time.Time) {
-	te.t.Helper()
-	if te.now.After(now) {
-		te.t.Fatalf("time moved backwards: %v -> %v", te.now, now)
-	}
-	te.now = now
-	for _, tc := range te.conns {
-		if !tc.timer.After(te.now) {
-			tc.conn.sendMsg(timerEvent{})
-			tc.wait()
-		}
-	}
-}
-
 // testEndpointHooks implements endpointTestHooks.
 type testEndpointHooks testEndpoint
-
-func (te *testEndpointHooks) timeNow() time.Time {
-	return te.now
-}
 
 func (te *testEndpointHooks) newConn(c *Conn) {
 	tc := newTestConnForConn(te.t, (*testEndpoint)(te), c)
@@ -325,6 +301,8 @@ func (te *testEndpointUDPConn) Read(f func(*datagram)) {
 }
 
 func (te *testEndpointUDPConn) Write(dgram datagram) error {
+	te.sentDatagramsMu.Lock()
+	defer te.sentDatagramsMu.Unlock()
 	te.sentDatagrams = append(te.sentDatagrams, append([]byte(nil), dgram.b...))
 	return nil
 }

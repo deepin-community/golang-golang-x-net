@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -111,7 +109,7 @@ func (c *Conn) setState(now time.Time, state connState) {
 	}
 }
 
-// confirmHandshake is called when the TLS handshake completes.
+// handshakeDone is called when the TLS handshake completes.
 func (c *Conn) handshakeDone() {
 	close(c.lifetime.readyc)
 }
@@ -178,7 +176,7 @@ func (c *Conn) sendOK(now time.Time) bool {
 	}
 }
 
-// sendConnectionClose reports that the conn has sent a CONNECTION_CLOSE to the peer.
+// sentConnectionClose reports that the conn has sent a CONNECTION_CLOSE to the peer.
 func (c *Conn) sentConnectionClose(now time.Time) {
 	switch c.lifetime.state {
 	case connStatePeerClosed:
@@ -228,6 +226,17 @@ func (c *Conn) setFinalError(err error) {
 	}
 	c.lifetime.finalErr = err
 	close(c.lifetime.donec)
+}
+
+// finalError returns the final connection status reported to the user,
+// or nil if a final status has not yet been set.
+func (c *Conn) finalError() error {
+	select {
+	case <-c.lifetime.donec:
+		return c.lifetime.finalErr
+	default:
+	}
+	return nil
 }
 
 func (c *Conn) waitReady(ctx context.Context) error {

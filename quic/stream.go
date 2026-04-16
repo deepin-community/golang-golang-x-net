@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -12,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+
+	"golang.org/x/net/internal/quic/quicwire"
 )
 
 // A Stream is an ordered byte stream.
@@ -187,6 +187,15 @@ func newStream(c *Conn, id streamID) *Stream {
 	return s
 }
 
+// ID returns the QUIC stream ID of s.
+//
+// As specified in RFC 9000, the two least significant bits of a stream ID
+// indicate the initiator and directionality of the stream. The upper bits are
+// the stream number.
+func (s *Stream) ID() int64 {
+	return int64(s.id)
+}
+
 // SetReadContext sets the context used for reads from the stream.
 //
 // It is not safe to call SetReadContext concurrently.
@@ -236,7 +245,7 @@ func (s *Stream) Read(b []byte) (n int, err error) {
 		s.inbufoff += n
 		return n, nil
 	}
-	if err := s.ingate.waitAndLock(s.inctx, s.conn.testHooks); err != nil {
+	if err := s.ingate.waitAndLock(s.inctx); err != nil {
 		return 0, err
 	}
 	if s.inbufoff > 0 {
@@ -254,6 +263,11 @@ func (s *Stream) Read(b []byte) (n int, err error) {
 		s.conn.handleStreamBytesReadOffLoop(bytesRead) // must be done with ingate unlocked
 	}()
 	if s.inresetcode != -1 {
+		if s.inresetcode == streamResetByConnClose {
+			if err := s.conn.finalError(); err != nil {
+				return 0, err
+			}
+		}
 		return 0, fmt.Errorf("stream reset by peer: %w", StreamErrorCode(s.inresetcode))
 	}
 	if s.inclosed.isSet() {
@@ -308,7 +322,7 @@ func (s *Stream) ReadByte() (byte, error) {
 	var b [1]byte
 	n, err := s.Read(b[:])
 	if n > 0 {
-		return b[0], err
+		return b[0], nil
 	}
 	return 0, err
 }
@@ -345,20 +359,16 @@ func (s *Stream) Write(b []byte) (n int, err error) {
 		if len(b) > 0 && !canWrite {
 			// Our send buffer is full. Wait for the peer to ack some data.
 			s.outUnlock()
-			if err := s.outgate.waitAndLock(s.outctx, s.conn.testHooks); err != nil {
+			if err := s.outgate.waitAndLock(s.outctx); err != nil {
 				return n, err
 			}
 			// Successfully returning from waitAndLockGate means we are no longer
 			// write blocked. (Unlike traditional condition variables, gates do not
 			// have spurious wakeups.)
 		}
-		if s.outreset.isSet() {
+		if err := s.writeErrorLocked(); err != nil {
 			s.outUnlock()
-			return n, errors.New("write to reset stream")
-		}
-		if s.outclosed.isSet() {
-			s.outUnlock()
-			return n, errors.New("write to closed stream")
+			return n, err
 		}
 		if len(b) == 0 {
 			break
@@ -418,7 +428,7 @@ func (s *Stream) Write(b []byte) (n int, err error) {
 	return n, nil
 }
 
-// WriteBytes writes a single byte to the stream.
+// WriteByte writes a single byte to the stream.
 func (s *Stream) WriteByte(c byte) error {
 	if s.outbufoff < len(s.outbuf) {
 		s.outbuf[s.outbufoff] = c
@@ -445,10 +455,34 @@ func (s *Stream) flushFastOutputBuffer() {
 // Flush flushes data written to the stream.
 // It does not wait for the peer to acknowledge receipt of the data.
 // Use Close to wait for the peer's acknowledgement.
-func (s *Stream) Flush() {
+func (s *Stream) Flush() error {
+	if s.IsReadOnly() {
+		return errors.New("flush of read-only stream")
+	}
 	s.outgate.lock()
 	defer s.outUnlock()
+	if err := s.writeErrorLocked(); err != nil {
+		return err
+	}
 	s.flushLocked()
+	return nil
+}
+
+// writeErrorLocked returns the error (if any) which should be returned by write operations
+// due to the stream being reset or closed.
+func (s *Stream) writeErrorLocked() error {
+	if s.outreset.isSet() {
+		if s.outresetcode == streamResetByConnClose {
+			if err := s.conn.finalError(); err != nil {
+				return err
+			}
+		}
+		return errors.New("write to reset stream")
+	}
+	if s.outclosed.isSet() {
+		return errors.New("write to closed stream")
+	}
+	return nil
 }
 
 func (s *Stream) flushLocked() {
@@ -560,8 +594,8 @@ func (s *Stream) resetInternal(code uint64, userClosed bool) {
 	if s.outreset.isSet() {
 		return
 	}
-	if code > maxVarint {
-		code = maxVarint
+	if code > quicwire.MaxVarint {
+		code = quicwire.MaxVarint
 	}
 	// We could check here to see if the stream is closed and the
 	// peer has acked all the data and the FIN, but sending an
@@ -595,8 +629,11 @@ func (s *Stream) connHasClosed() {
 	s.outgate.lock()
 	if localClose {
 		s.outclosed.set()
+		s.outreset.set()
+	} else {
+		s.outresetcode = streamResetByConnClose
+		s.outreset.setReceived()
 	}
-	s.outreset.set()
 	s.outUnlock()
 }
 

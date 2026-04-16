@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -106,7 +104,7 @@ func (e peerTransportError) Error() string {
 }
 
 // A StreamErrorCode is an application protocol error code (RFC 9000, Section 20.2)
-// indicating whay a stream is being closed.
+// indicating why a stream is being closed.
 type StreamErrorCode uint64
 
 func (e StreamErrorCode) Error() string {
@@ -121,8 +119,7 @@ type ApplicationError struct {
 }
 
 func (e *ApplicationError) Error() string {
-	// TODO: Include the Reason string here, but sanitize it first.
-	return fmt.Sprintf("AppError %v", e.Code)
+	return fmt.Sprintf("peer closed connection: %v: %q", e.Code, e.Reason)
 }
 
 // Is reports a match if err is an *ApplicationError with a matching Code.

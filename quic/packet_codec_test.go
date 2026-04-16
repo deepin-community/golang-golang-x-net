@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -15,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/net/internal/quic/quicwire"
 	"golang.org/x/net/quic/qlog"
 )
 
@@ -264,6 +263,65 @@ func TestFrameEncodeDecode(t *testing.T) {
 			0x0f, // Gap (i)
 			0x0e, // ACK Range Length (i)
 		},
+	}, {
+		s: "ACK Delay=10 [0,16) [17,32) ECN=[1,2,3]",
+		j: `"error: debugFrameAck should not appear as a slog Value"`,
+		f: debugFrameAck{
+			ackDelay: 10,
+			ranges: []i64range[packetNumber]{
+				{0x00, 0x10},
+				{0x11, 0x20},
+			},
+			ecn: ecnCounts{1, 2, 3},
+		},
+		b: []byte{
+			0x03, // TYPE (i) = 0x3
+			0x1f, // Largest Acknowledged (i)
+			10,   // ACK Delay (i)
+			0x01, // ACK Range Count (i)
+			0x0e, // First ACK Range (i)
+			0x00, // Gap (i)
+			0x0f, // ACK Range Length (i)
+			0x01, // ECT0 Count (i)
+			0x02, // ECT1 Count (i)
+			0x03, // ECN-CE Count (i)
+		},
+		truncated: []byte{
+			0x03, // TYPE (i) = 0x3
+			0x1f, // Largest Acknowledged (i)
+			10,   // ACK Delay (i)
+			0x00, // ACK Range Count (i)
+			0x0e, // First ACK Range (i)
+			0x01, // ECT0 Count (i)
+			0x02, // ECT1 Count (i)
+			0x03, // ECN-CE Count (i)
+		},
+	}, {
+		s: "ACK Delay=10 [17,32) ECN=[1,2,3]",
+		j: `"error: debugFrameAck should not appear as a slog Value"`,
+		f: debugFrameAck{
+			ackDelay: 10,
+			ranges: []i64range[packetNumber]{
+				{0x11, 0x20},
+			},
+			ecn: ecnCounts{1, 2, 3},
+		},
+		b: []byte{
+			0x03, // TYPE (i) = 0x3
+			0x1f, // Largest Acknowledged (i)
+			10,   // ACK Delay (i)
+			0x00, // ACK Range Count (i)
+			0x0e, // First ACK Range (i)
+			0x01, // ECT0 Count (i)
+			0x02, // ECT1 Count (i)
+			0x03, // ECN-CE Count (i)
+		},
+		// Downgrading to a type 0x2 ACK frame is not allowed: "Even if an
+		// endpoint does not set an ECT field in packets it sends, the endpoint
+		// MUST provide feedback about ECN markings it receives, if these are
+		// accessible."
+		// https://www.rfc-editor.org/rfc/rfc9000.html#section-13.4.1-2
+		truncated: nil,
 	}, {
 		s: "RESET_STREAM ID=1 Code=2 FinalSize=3",
 		j: `{"frame_type":"reset_stream","stream_id":1,"final_size":3}`,
@@ -676,6 +734,7 @@ func TestFrameDecode(t *testing.T) {
 			ranges: []i64range[packetNumber]{
 				{0, 1},
 			},
+			ecn: ecnCounts{1, 2, 3},
 		},
 		b: []byte{
 			0x03,             // TYPE (i) = 0x02..0x03
@@ -736,7 +795,7 @@ func TestFrameDecodeErrors(t *testing.T) {
 		name: "MAX_STREAMS with too many streams",
 		b: func() []byte {
 			// https://www.rfc-editor.org/rfc/rfc9000.html#section-19.11-5.2.1
-			return appendVarint([]byte{frameTypeMaxStreamsBidi}, (1<<60)+1)
+			return quicwire.AppendVarint([]byte{frameTypeMaxStreamsBidi}, (1<<60)+1)
 		}(),
 	}, {
 		name: "NEW_CONNECTION_ID too small",

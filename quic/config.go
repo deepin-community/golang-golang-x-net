@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -11,6 +9,8 @@ import (
 	"log/slog"
 	"math"
 	"time"
+
+	"golang.org/x/net/internal/quic/quicwire"
 )
 
 // A Config structure configures a QUIC endpoint.
@@ -134,15 +134,15 @@ func (c *Config) maxUniRemoteStreams() int64 {
 }
 
 func (c *Config) maxStreamReadBufferSize() int64 {
-	return configDefault(c.MaxStreamReadBufferSize, 1<<20, maxVarint)
+	return configDefault(c.MaxStreamReadBufferSize, 1<<20, quicwire.MaxVarint)
 }
 
 func (c *Config) maxStreamWriteBufferSize() int64 {
-	return configDefault(c.MaxStreamWriteBufferSize, 1<<20, maxVarint)
+	return configDefault(c.MaxStreamWriteBufferSize, 1<<20, quicwire.MaxVarint)
 }
 
 func (c *Config) maxConnReadBufferSize() int64 {
-	return configDefault(c.MaxConnReadBufferSize, 1<<20, maxVarint)
+	return configDefault(c.MaxConnReadBufferSize, 1<<20, quicwire.MaxVarint)
 }
 
 func (c *Config) handshakeTimeout() time.Duration {

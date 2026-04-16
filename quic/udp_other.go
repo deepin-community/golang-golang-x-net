@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21 && (quicbasicnet || !(darwin || linux))
+//go:build quicbasicnet || !(darwin || linux)
 
 package quic
 
@@ -43,7 +43,7 @@ func (c *netUDPConn) LocalAddr() netip.AddrPort {
 func (c *netUDPConn) Read(f func(*datagram)) {
 	for {
 		dgram := newDatagram()
-		n, _, _, peerAddr, err := c.c.ReadMsgUDPAddrPort(dgram.b, nil)
+		n, peerAddr, err := c.c.ReadFromUDPAddrPort(dgram.b)
 		if err != nil {
 			return
 		}

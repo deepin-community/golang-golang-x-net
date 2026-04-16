@@ -16,9 +16,6 @@ import (
 	"golang.org/x/net/http/httpproxy"
 )
 
-// setHelper calls t.Helper() for Go 1.9+ (see go19_test.go) and does nothing otherwise.
-var setHelper = func(t *testing.T) {}
-
 type proxyForURLTest struct {
 	cfg     httpproxy.Config
 	req     string // URL to fetch; blank means "http://example.com"
@@ -211,11 +208,18 @@ var proxyForURLTests = []proxyForURLTest{{
 	},
 	req:  "http://www.xn--fsq092h.com",
 	want: "<nil>",
+}, {
+	cfg: httpproxy.Config{
+		NoProxy:   "example.com",
+		HTTPProxy: "proxy",
+	},
+	req:  "http://[1000::%25.example.com]:123",
+	want: "http://proxy",
 },
 }
 
 func testProxyForURL(t *testing.T, tt proxyForURLTest) {
-	setHelper(t)
+	t.Helper()
 	reqURLStr := tt.req
 	if reqURLStr == "" {
 		reqURLStr = "http://example.com"

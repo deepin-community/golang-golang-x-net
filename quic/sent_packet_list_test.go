@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import "testing"
@@ -28,7 +26,7 @@ func TestSentPacketListSlidingWindow(t *testing.T) {
 		if got := list.nth(0); got != sent {
 			t.Fatalf("list.nth(0) != list.num(%v)", prev)
 		}
-		sent.acked = true
+		sent.state = sentPacketAcked
 		list.clean()
 		if got := list.num(prev); got != nil {
 			t.Fatalf("list.num(%v) = packet %v, expected it to be discarded", prev, got.num)
@@ -84,7 +82,7 @@ func TestSentPacketListCleanAll(t *testing.T) {
 	}
 	// Mark all the packets as acked.
 	for i := packetNumber(0); i < count; i++ {
-		list.num(i).acked = true
+		list.num(i).state = sentPacketAcked
 	}
 	list.clean()
 	if got, want := list.size, 0; got != want {

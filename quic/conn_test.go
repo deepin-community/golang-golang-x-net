@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -19,6 +17,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/net/quic/qlog"
@@ -29,7 +28,8 @@ var (
 	qlogdir = flag.String("qlog", "", "write qlog logs to directory")
 )
 
-func TestConnTestConn(t *testing.T) {
+func TestConnTestConn(t *testing.T) { synctest.Test(t, testConnTestConn) }
+func testConnTestConn(t *testing.T) {
 	tc := newTestConn(t, serverSide)
 	tc.handshake()
 	if got, want := tc.timeUntilEvent(), defaultMaxIdleTimeout; got != want {
@@ -42,13 +42,13 @@ func TestConnTestConn(t *testing.T) {
 		})
 		return
 	}).result()
-	if !ranAt.Equal(tc.endpoint.now) {
-		t.Errorf("func ran on loop at %v, want %v", ranAt, tc.endpoint.now)
+	if !ranAt.Equal(time.Now()) {
+		t.Errorf("func ran on loop at %v, want %v", ranAt, time.Now())
 	}
-	tc.wait()
+	synctest.Wait()
 
-	nextTime := tc.endpoint.now.Add(defaultMaxIdleTimeout / 2)
-	tc.advanceTo(nextTime)
+	nextTime := time.Now().Add(defaultMaxIdleTimeout / 2)
+	time.Sleep(time.Until(nextTime))
 	ranAt, _ = runAsync(tc, func(ctx context.Context) (when time.Time, _ error) {
 		tc.conn.runOnLoop(ctx, func(now time.Time, c *Conn) {
 			when = now
@@ -58,7 +58,7 @@ func TestConnTestConn(t *testing.T) {
 	if !ranAt.Equal(nextTime) {
 		t.Errorf("func ran on loop at %v, want %v", ranAt, nextTime)
 	}
-	tc.wait()
+	synctest.Wait()
 
 	tc.advanceToTimer()
 	if got := tc.conn.lifetime.state; got != connStateDone {
@@ -127,12 +127,9 @@ const maxTestKeyPhases = 3
 // A testConn is a Conn whose external interactions (sending and receiving packets,
 // setting timers) can be manipulated in tests.
 type testConn struct {
-	t              *testing.T
-	conn           *Conn
-	endpoint       *testEndpoint
-	timer          time.Time
-	timerLastFired time.Time
-	idlec          chan struct{} // only accessed on the conn's loop
+	t        *testing.T
+	conn     *Conn
+	endpoint *testEndpoint
 
 	// Keys are distinct from the conn's keys,
 	// because the test may know about keys before the conn does.
@@ -152,7 +149,7 @@ type testConn struct {
 	// CRYPTO data produced by the conn's QUICConn is placed in
 	// cryptoDataOut.
 	//
-	// The peerTLSConn is is a QUICConn representing the peer.
+	// The peerTLSConn is a QUICConn representing the peer.
 	// CRYPTO data produced by the conn is written to peerTLSConn,
 	// and data produced by peerTLSConn is placed in cryptoDataIn.
 	cryptoDataOut map[tls.QUICEncryptionLevel][]byte
@@ -162,6 +159,9 @@ type testConn struct {
 	// Information about the conn's (fake) peer.
 	peerConnID        []byte                         // source conn id of peer's packets
 	peerNextPacketNum [numberSpaceCount]packetNumber // next packet number to use
+
+	// Maximum packet number received from the conn.
+	pnumMax [numberSpaceCount]packetNumber
 
 	// Datagrams, packets, and frames sent by the conn,
 	// but not yet processed by the test.
@@ -182,8 +182,6 @@ type testConn struct {
 	// Values to set in packets sent to the conn.
 	sendKeyNumber   int
 	sendKeyPhaseBit bool
-
-	asyncTestState
 }
 
 type test1RTTKeys struct {
@@ -197,10 +195,6 @@ type keySecret struct {
 }
 
 // newTestConn creates a Conn for testing.
-//
-// The Conn's event loop is controlled by the test,
-// allowing test code to access Conn state directly
-// by first ensuring the loop goroutine is idle.
 func newTestConn(t *testing.T, side connSide, opts ...any) *testConn {
 	t.Helper()
 	config := &Config{
@@ -241,7 +235,7 @@ func newTestConn(t *testing.T, side connSide, opts ...any) *testConn {
 	endpoint.configTransportParams = configTransportParams
 	endpoint.configTestConn = configTestConn
 	conn, err := endpoint.e.newConn(
-		endpoint.now,
+		time.Now(),
 		config,
 		side,
 		cids,
@@ -251,7 +245,7 @@ func newTestConn(t *testing.T, side connSide, opts ...any) *testConn {
 		t.Fatal(err)
 	}
 	tc := endpoint.conns[conn]
-	tc.wait()
+	synctest.Wait()
 	return tc
 }
 
@@ -305,76 +299,33 @@ func newTestConnForConn(t *testing.T, endpoint *testEndpoint, conn *Conn) *testC
 	return tc
 }
 
-// advance causes time to pass.
-func (tc *testConn) advance(d time.Duration) {
-	tc.t.Helper()
-	tc.endpoint.advance(d)
-}
-
-// advanceTo sets the current time.
-func (tc *testConn) advanceTo(now time.Time) {
-	tc.t.Helper()
-	tc.endpoint.advanceTo(now)
-}
-
 // advanceToTimer sets the current time to the time of the Conn's next timer event.
 func (tc *testConn) advanceToTimer() {
-	if tc.timer.IsZero() {
+	when := tc.nextEvent()
+	if when.IsZero() {
 		tc.t.Fatalf("advancing to timer, but timer is not set")
 	}
-	tc.advanceTo(tc.timer)
-}
-
-func (tc *testConn) timerDelay() time.Duration {
-	if tc.timer.IsZero() {
-		return math.MaxInt64 // infinite
-	}
-	if tc.timer.Before(tc.endpoint.now) {
-		return 0
-	}
-	return tc.timer.Sub(tc.endpoint.now)
+	time.Sleep(time.Until(when))
+	synctest.Wait()
 }
 
 const infiniteDuration = time.Duration(math.MaxInt64)
 
 // timeUntilEvent returns the amount of time until the next connection event.
 func (tc *testConn) timeUntilEvent() time.Duration {
-	if tc.timer.IsZero() {
+	next := tc.nextEvent()
+	if next.IsZero() {
 		return infiniteDuration
 	}
-	if tc.timer.Before(tc.endpoint.now) {
-		return 0
-	}
-	return tc.timer.Sub(tc.endpoint.now)
+	return max(0, time.Until(next))
 }
 
-// wait blocks until the conn becomes idle.
-// The conn is idle when it is blocked waiting for a packet to arrive or a timer to expire.
-// Tests shouldn't need to call wait directly.
-// testConn methods that wake the Conn event loop will call wait for them.
-func (tc *testConn) wait() {
-	tc.t.Helper()
-	idlec := make(chan struct{})
-	fail := false
-	tc.conn.sendMsg(func(now time.Time, c *Conn) {
-		if tc.idlec != nil {
-			tc.t.Errorf("testConn.wait called concurrently")
-			fail = true
-			close(idlec)
-		} else {
-			// nextMessage will close idlec.
-			tc.idlec = idlec
-		}
+func (tc *testConn) nextEvent() time.Time {
+	nextc := make(chan time.Time)
+	tc.conn.sendMsg(func(now, next time.Time, c *Conn) {
+		nextc <- next
 	})
-	select {
-	case <-idlec:
-	case <-tc.conn.donec:
-		// We may have async ops that can proceed now that the conn is done.
-		tc.wakeAsync()
-	}
-	if fail {
-		panic(fail)
-	}
+	return <-nextc
 }
 
 func (tc *testConn) cleanup() {
@@ -436,7 +387,7 @@ func (tc *testConn) write(d *testDatagram) {
 	tc.endpoint.writeDatagram(d)
 }
 
-// writeFrame sends the Conn a datagram containing the given frames.
+// writeFrames sends the Conn a datagram containing the given frames.
 func (tc *testConn) writeFrames(ptype packetType, frames ...debugFrame) {
 	tc.t.Helper()
 	space := spaceForPacketType(ptype)
@@ -497,7 +448,7 @@ func (tc *testConn) ignoreFrame(frameType byte) {
 // It returns nil if the Conn has no more datagrams to send at this time.
 func (tc *testConn) readDatagram() *testDatagram {
 	tc.t.Helper()
-	tc.wait()
+	synctest.Wait()
 	tc.sentPackets = nil
 	tc.sentFrames = nil
 	buf := tc.endpoint.read()
@@ -847,6 +798,7 @@ func parseTestDatagram(t *testing.T, te *testEndpoint, tc *testConn, buf []byte)
 			}
 		case packetTypeInitial, packetTypeHandshake:
 			var k fixedKeys
+			var pnumMax packetNumber
 			if tc == nil {
 				if ptype == packetTypeInitial {
 					p, _ := parseGenericLongHeaderPacket(buf)
@@ -858,17 +810,26 @@ func parseTestDatagram(t *testing.T, te *testEndpoint, tc *testConn, buf []byte)
 				switch ptype {
 				case packetTypeInitial:
 					k = tc.keysInitial.r
+					pnumMax = tc.pnumMax[initialSpace]
 				case packetTypeHandshake:
 					k = tc.keysHandshake.r
+					pnumMax = tc.pnumMax[handshakeSpace]
 				}
 			}
 			if !k.isSet() {
 				t.Fatalf("reading %v packet with no read key", ptype)
 			}
-			var pnumMax packetNumber // TODO: Track packet numbers.
 			p, n := parseLongHeaderPacket(buf, k, pnumMax)
 			if n < 0 {
 				t.Fatalf("packet parse error")
+			}
+			if tc != nil {
+				switch ptype {
+				case packetTypeInitial:
+					tc.pnumMax[initialSpace] = max(pnumMax, p.num)
+				case packetTypeHandshake:
+					tc.pnumMax[handshakeSpace] = max(pnumMax, p.num)
+				}
 			}
 			frames, err := parseTestFrames(t, p.payload)
 			if err != nil {
@@ -893,7 +854,7 @@ func parseTestDatagram(t *testing.T, te *testEndpoint, tc *testConn, buf []byte)
 			if tc == nil || !tc.rkeyAppData.hdr.isSet() {
 				t.Fatalf("reading 1-RTT packet with no read key")
 			}
-			var pnumMax packetNumber // TODO: Track packet numbers.
+			pnumMax := tc.pnumMax[appDataSpace]
 			pnumOff := 1 + len(tc.peerConnID)
 			// Try unprotecting the packet with the first maxTestKeyPhases keys.
 			var phase int
@@ -916,6 +877,7 @@ func parseTestDatagram(t *testing.T, te *testEndpoint, tc *testConn, buf []byte)
 			if err != nil {
 				t.Fatalf("1-RTT packet payload parse error")
 			}
+			tc.pnumMax[appDataSpace] = max(pnumMax, pnum)
 			frames, err := parseTestFrames(t, pay)
 			if err != nil {
 				t.Fatal(err)
@@ -984,11 +946,11 @@ func spaceForPacketType(ptype packetType) numberSpace {
 // testConnHooks implements connTestHooks.
 type testConnHooks testConn
 
-func (tc *testConnHooks) init() {
+func (tc *testConnHooks) init(first bool) {
 	tc.conn.keysAppData.updateAfter = maxPacketNumber // disable key updates
 	tc.keysInitial.r = tc.conn.keysInitial.w
 	tc.keysInitial.w = tc.conn.keysInitial.r
-	if tc.conn.side == serverSide {
+	if first && tc.conn.side == serverSide {
 		tc.endpoint.acceptQueue = append(tc.endpoint.acceptQueue, (*testConn)(tc))
 	}
 }
@@ -1078,7 +1040,7 @@ func (tc *testConnHooks) handleTLSEvent(e tls.QUICEvent) {
 		case tls.QUICTransportParameters:
 			p, err := unmarshalTransportParams(e.Data)
 			if err != nil {
-				tc.t.Logf("sent unparseable transport parameters %x %v", e.Data, err)
+				tc.t.Logf("sent unparsable transport parameters %x %v", e.Data, err)
 			} else {
 				tc.sentTransportParameters = &p
 			}
@@ -1086,46 +1048,8 @@ func (tc *testConnHooks) handleTLSEvent(e tls.QUICEvent) {
 	}
 }
 
-// nextMessage is called by the Conn's event loop to request its next event.
-func (tc *testConnHooks) nextMessage(msgc chan any, timer time.Time) (now time.Time, m any) {
-	tc.timer = timer
-	for {
-		if !timer.IsZero() && !timer.After(tc.endpoint.now) {
-			if timer.Equal(tc.timerLastFired) {
-				// If the connection timer fires at time T, the Conn should take some
-				// action to advance the timer into the future. If the Conn reschedules
-				// the timer for the same time, it isn't making progress and we have a bug.
-				tc.t.Errorf("connection timer spinning; now=%v timer=%v", tc.endpoint.now, timer)
-			} else {
-				tc.timerLastFired = timer
-				return tc.endpoint.now, timerEvent{}
-			}
-		}
-		select {
-		case m := <-msgc:
-			return tc.endpoint.now, m
-		default:
-		}
-		if !tc.wakeAsync() {
-			break
-		}
-	}
-	// If the message queue is empty, then the conn is idle.
-	if tc.idlec != nil {
-		idlec := tc.idlec
-		tc.idlec = nil
-		close(idlec)
-	}
-	m = <-msgc
-	return tc.endpoint.now, m
-}
-
 func (tc *testConnHooks) newConnID(seq int64) ([]byte, error) {
 	return testLocalConnID(seq), nil
-}
-
-func (tc *testConnHooks) timeNow() time.Time {
-	return tc.endpoint.now
 }
 
 // testLocalConnID returns the connection ID with a given sequence number
@@ -1154,7 +1078,7 @@ func testPeerStatelessResetToken(seq int64) statelessResetToken {
 
 // canceledContext returns a canceled Context.
 //
-// Functions which take a context preference progress over cancelation.
+// Functions which take a context preference progress over cancellation.
 // For example, a read with a canceled context will return data if any is available.
 // Tests use canceled contexts to perform non-blocking operations.
 func canceledContext() context.Context {

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import "context"
@@ -27,7 +25,7 @@ func newGate() gate {
 	return g
 }
 
-// newLocked gate returns a new, locked gate.
+// newLockedGate returns a new, locked gate.
 func newLockedGate() gate {
 	return gate{
 		set:   make(chan struct{}, 1),
@@ -48,10 +46,7 @@ func (g *gate) lock() (set bool) {
 
 // waitAndLock waits until the condition is set before acquiring the gate.
 // If the context expires, waitAndLock returns an error and does not acquire the gate.
-func (g *gate) waitAndLock(ctx context.Context, testHooks connTestHooks) error {
-	if testHooks != nil {
-		return testHooks.waitUntil(ctx, g.lockIfSet)
-	}
+func (g *gate) waitAndLock(ctx context.Context) error {
 	select {
 	case <-g.set:
 		return nil
@@ -84,7 +79,7 @@ func (g *gate) unlock(set bool) {
 	}
 }
 
-// unlock sets the condition to the result of f and releases the gate.
+// unlockFunc sets the condition to the result of f and releases the gate.
 // Useful in defers.
 func (g *gate) unlockFunc(f func() bool) {
 	g.unlock(f())

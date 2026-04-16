@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 // A sentPacketList is a ring buffer of sentPackets.
@@ -69,7 +67,7 @@ func (s *sentPacketList) num(num packetNumber) *sentPacket {
 func (s *sentPacketList) clean() {
 	for s.size > 0 {
 		sent := s.p[s.off]
-		if !sent.acked && !sent.lost {
+		if sent.state == sentPacketSent {
 			return
 		}
 		sent.recycle()

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -13,6 +11,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"golang.org/x/net/internal/quic/quicwire"
 )
 
 func TestTransportParametersMarshalUnmarshal(t *testing.T) {
@@ -334,9 +334,9 @@ func TestTransportParameterMaxIdleTimeoutOverflowsDuration(t *testing.T) {
 	tooManyMS := 1 + (math.MaxInt64 / uint64(time.Millisecond))
 
 	var enc []byte
-	enc = appendVarint(enc, paramMaxIdleTimeout)
-	enc = appendVarint(enc, uint64(sizeVarint(tooManyMS)))
-	enc = appendVarint(enc, uint64(tooManyMS))
+	enc = quicwire.AppendVarint(enc, paramMaxIdleTimeout)
+	enc = quicwire.AppendVarint(enc, uint64(quicwire.SizeVarint(tooManyMS)))
+	enc = quicwire.AppendVarint(enc, uint64(tooManyMS))
 
 	dec, err := unmarshalTransportParams(enc)
 	if err != nil {

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -11,9 +9,13 @@ import (
 	"context"
 	"crypto/tls"
 	"testing"
+	"testing/synctest"
 )
 
 func TestVersionNegotiationServerReceivesUnknownVersion(t *testing.T) {
+	synctest.Test(t, testVersionNegotiationServerReceivesUnknownVersion)
+}
+func testVersionNegotiationServerReceivesUnknownVersion(t *testing.T) {
 	config := &Config{
 		TLSConfig: newTestTLSConfig(serverSide),
 	}
@@ -57,6 +59,9 @@ func TestVersionNegotiationServerReceivesUnknownVersion(t *testing.T) {
 }
 
 func TestVersionNegotiationClientAborts(t *testing.T) {
+	synctest.Test(t, testVersionNegotiationClientAborts)
+}
+func testVersionNegotiationClientAborts(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	p := tc.readPacket() // client Initial packet
 	tc.endpoint.write(&datagram{
@@ -69,6 +74,9 @@ func TestVersionNegotiationClientAborts(t *testing.T) {
 }
 
 func TestVersionNegotiationClientIgnoresAfterProcessingPacket(t *testing.T) {
+	synctest.Test(t, testVersionNegotiationClientIgnoresAfterProcessingPacket)
+}
+func testVersionNegotiationClientIgnoresAfterProcessingPacket(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.ignoreFrame(frameTypeAck)
 	p := tc.readPacket() // client Initial packet
@@ -91,6 +99,9 @@ func TestVersionNegotiationClientIgnoresAfterProcessingPacket(t *testing.T) {
 }
 
 func TestVersionNegotiationClientIgnoresMismatchingSourceConnID(t *testing.T) {
+	synctest.Test(t, testVersionNegotiationClientIgnoresMismatchingSourceConnID)
+}
+func testVersionNegotiationClientIgnoresMismatchingSourceConnID(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.ignoreFrame(frameTypeAck)
 	p := tc.readPacket() // client Initial packet
