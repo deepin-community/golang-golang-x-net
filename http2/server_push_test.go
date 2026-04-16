@@ -2,23 +2,24 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package http2
+package http2_test
 
 import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"reflect"
-	"runtime"
 	"strconv"
-	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	. "golang.org/x/net/http2"
 )
 
-func TestServer_Push_Success(t *testing.T) {
+func TestServer_Push_Success(t *testing.T) { synctestTest(t, testServer_Push_Success) }
+func testServer_Push_Success(t testing.TB) {
 	const (
 		mainBody   = "<html>index page</html>"
 		pushedBody = "<html>pushed page</html>"
@@ -40,7 +41,7 @@ func TestServer_Push_Success(t *testing.T) {
 		if r.Body == nil {
 			return fmt.Errorf("nil Body")
 		}
-		if buf, err := ioutil.ReadAll(r.Body); err != nil || len(buf) != 0 {
+		if buf, err := io.ReadAll(r.Body); err != nil || len(buf) != 0 {
 			return fmt.Errorf("ReadAll(Body)=%q,%v, want '',nil", buf, err)
 		}
 		return nil
@@ -106,7 +107,7 @@ func TestServer_Push_Success(t *testing.T) {
 			errc <- fmt.Errorf("unknown RequestURL %q", r.URL.RequestURI())
 		}
 	})
-	stURL = st.ts.URL
+	stURL = "https://" + st.authority()
 
 	// Send one request, which should push two responses.
 	st.greet()
@@ -170,7 +171,7 @@ func TestServer_Push_Success(t *testing.T) {
 				return checkPushPromise(f, 2, [][2]string{
 					{":method", "GET"},
 					{":scheme", "https"},
-					{":authority", st.ts.Listener.Addr().String()},
+					{":authority", st.authority()},
 					{":path", "/pushed?get"},
 					{"user-agent", userAgent},
 				})
@@ -179,7 +180,7 @@ func TestServer_Push_Success(t *testing.T) {
 				return checkPushPromise(f, 4, [][2]string{
 					{":method", "HEAD"},
 					{":scheme", "https"},
-					{":authority", st.ts.Listener.Addr().String()},
+					{":authority", st.authority()},
 					{":path", "/pushed?head"},
 					{"cookie", cookie},
 					{"user-agent", userAgent},
@@ -219,12 +220,12 @@ func TestServer_Push_Success(t *testing.T) {
 
 	consumed := map[uint32]int{}
 	for k := 0; len(expected) > 0; k++ {
-		f, err := st.readFrame()
-		if err != nil {
+		f := st.readFrame()
+		if f == nil {
 			for id, left := range expected {
 				t.Errorf("stream %d: missing %d frames", id, len(left))
 			}
-			t.Fatalf("readFrame %d: %v", k, err)
+			break
 		}
 		id := f.Header().StreamID
 		label := fmt.Sprintf("stream %d, frame %d", id, consumed[id])
@@ -243,7 +244,8 @@ func TestServer_Push_Success(t *testing.T) {
 	}
 }
 
-func TestServer_Push_SuccessNoRace(t *testing.T) {
+func TestServer_Push_SuccessNoRace(t *testing.T) { synctestTest(t, testServer_Push_SuccessNoRace) }
+func testServer_Push_SuccessNoRace(t testing.TB) {
 	// Regression test for issue #18326. Ensure the request handler can mutate
 	// pushed request headers without racing with the PUSH_PROMISE write.
 	errc := make(chan error, 2)
@@ -288,6 +290,9 @@ func TestServer_Push_SuccessNoRace(t *testing.T) {
 }
 
 func TestServer_Push_RejectRecursivePush(t *testing.T) {
+	synctestTest(t, testServer_Push_RejectRecursivePush)
+}
+func testServer_Push_RejectRecursivePush(t testing.TB) {
 	// Expect two requests, but might get three if there's a bug and the second push succeeds.
 	errc := make(chan error, 3)
 	handler := func(w http.ResponseWriter, r *http.Request) error {
@@ -324,6 +329,11 @@ func TestServer_Push_RejectRecursivePush(t *testing.T) {
 }
 
 func testServer_Push_RejectSingleRequest(t *testing.T, doPush func(http.Pusher, *http.Request) error, settings ...Setting) {
+	synctestTest(t, func(t testing.TB) {
+		testServer_Push_RejectSingleRequest_Bubble(t, doPush, settings...)
+	})
+}
+func testServer_Push_RejectSingleRequest_Bubble(t testing.TB, doPush func(http.Pusher, *http.Request) error, settings ...Setting) {
 	// Expect one request, but might get two if there's a bug and the push succeeds.
 	errc := make(chan error, 2)
 	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
@@ -340,10 +350,10 @@ func testServer_Push_RejectSingleRequest(t *testing.T, doPush func(http.Pusher, 
 		t.Error(err)
 	}
 	// Should not get a PUSH_PROMISE frame.
-	hf := st.wantHeaders()
-	if !hf.StreamEnded() {
-		t.Error("stream should end after headers")
-	}
+	st.wantHeaders(wantHeader{
+		streamID:  1,
+		endStream: true,
+	})
 }
 
 func TestServer_Push_RejectIfDisabled(t *testing.T) {
@@ -427,6 +437,9 @@ func TestServer_Push_RejectForbiddenHeader(t *testing.T) {
 }
 
 func TestServer_Push_StateTransitions(t *testing.T) {
+	synctestTest(t, testServer_Push_StateTransitions)
+}
+func testServer_Push_StateTransitions(t testing.TB) {
 	const body = "foo"
 
 	gotPromise := make(chan bool)
@@ -452,16 +465,16 @@ func TestServer_Push_StateTransitions(t *testing.T) {
 	defer st.Close()
 
 	st.greet()
-	if st.stream(2) != nil {
+	if st.streamExists(2) {
 		t.Fatal("stream 2 should be empty")
 	}
-	if got, want := st.streamState(2), stateIdle; got != want {
+	if got, want := st.streamState(2), StateIdle; got != want {
 		t.Fatalf("streamState(2)=%v, want %v", got, want)
 	}
 	getSlash(st)
 	// After the PUSH_PROMISE is sent, the stream should be stateHalfClosedRemote.
-	st.wantPushPromise()
-	if got, want := st.streamState(2), stateHalfClosedRemote; got != want {
+	_ = readFrame[*PushPromiseFrame](t, st)
+	if got, want := st.streamState(2), StateHalfClosedRemote; got != want {
 		t.Fatalf("streamState(2)=%v, want %v", got, want)
 	}
 	// We stall the HTTP handler for "/pushed" until the above check. If we don't
@@ -469,18 +482,20 @@ func TestServer_Push_StateTransitions(t *testing.T) {
 	// the stream before we check st.streamState(2) -- should that happen, we'll
 	// see stateClosed and fail the above check.
 	close(gotPromise)
-	st.wantHeaders()
-	if df := st.wantData(); !df.StreamEnded() {
-		t.Fatal("expected END_STREAM flag on DATA")
-	}
-	if got, want := st.streamState(2), stateClosed; got != want {
+	st.wantHeaders(wantHeader{
+		streamID:  2,
+		endStream: false,
+	})
+	if got, want := st.streamState(2), StateClosed; got != want {
 		t.Fatalf("streamState(2)=%v, want %v", got, want)
 	}
 	close(finishedPush)
 }
 
 func TestServer_Push_RejectAfterGoAway(t *testing.T) {
-	var readyOnce sync.Once
+	synctestTest(t, testServer_Push_RejectAfterGoAway)
+}
+func testServer_Push_RejectAfterGoAway(t testing.TB) {
 	ready := make(chan struct{})
 	errc := make(chan error, 2)
 	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
@@ -496,30 +511,15 @@ func TestServer_Push_RejectAfterGoAway(t *testing.T) {
 
 	// Send GOAWAY and wait for it to be processed.
 	st.fr.WriteGoAway(1, ErrCodeNo, nil)
-	go func() {
-		for {
-			select {
-			case <-ready:
-				return
-			default:
-				if runtime.GOARCH == "wasm" {
-					// Work around https://go.dev/issue/65178 to avoid goroutine starvation.
-					runtime.Gosched()
-				}
-			}
-			st.sc.serveMsgCh <- func(loopNum int) {
-				if !st.sc.pushEnabled {
-					readyOnce.Do(func() { close(ready) })
-				}
-			}
-		}
-	}()
+	synctest.Wait()
+	close(ready)
 	if err := <-errc; err != nil {
 		t.Error(err)
 	}
 }
 
-func TestServer_Push_Underflow(t *testing.T) {
+func TestServer_Push_Underflow(t *testing.T) { synctestTest(t, testServer_Push_Underflow) }
+func testServer_Push_Underflow(t testing.TB) {
 	// Test for #63511: Send several requests which generate PUSH_PROMISE responses,
 	// verify they all complete successfully.
 	st := newServerTester(t, func(w http.ResponseWriter, r *http.Request) {
@@ -555,9 +555,9 @@ func TestServer_Push_Underflow(t *testing.T) {
 	numPushPromises := 0
 	numHeaders := 0
 	for numHeaders < numRequests*2 || numPushPromises < numRequests {
-		f, err := st.readFrame()
-		if err != nil {
-			st.t.Fatal(err)
+		f := st.readFrame()
+		if f == nil {
+			st.t.Fatal("conn is idle, want frame")
 		}
 		switch f := f.(type) {
 		case *HeadersFrame:

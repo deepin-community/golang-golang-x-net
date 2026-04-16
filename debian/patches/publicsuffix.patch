@@ -5,8 +5,7 @@ Description: avoid download on build time; use data from "publicsuffix" package.
 
 --- a/publicsuffix/gen.go
 +++ b/publicsuffix/gen.go
-@@ -135,25 +135,20 @@
- 	if *version == "" {
+@@ -121,23 +121,18 @@
  		if *url != defaultURL {
  			return fmt.Errorf("-version was not specified, and the -url is not the default one")
  		}
@@ -36,4 +35,3 @@ Description: avoid download on build time; use data from "publicsuffix" package.
  	}
  
  	var root node
- 	icann := false

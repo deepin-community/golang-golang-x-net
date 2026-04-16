@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import "fmt"
@@ -34,7 +32,7 @@ func (c *Conn) handleAckOrLoss(space numberSpace, sent *sentPacket, fate packetF
 		switch f := sent.next(); f {
 		default:
 			panic(fmt.Sprintf("BUG: unhandled acked/lost frame type %x", f))
-		case frameTypeAck:
+		case frameTypeAck, frameTypeAckECN:
 			// Unlike most information, loss of an ACK frame does not trigger
 			// retransmission. ACKs are sent in response to ack-eliciting packets,
 			// and always contain the latest information available.

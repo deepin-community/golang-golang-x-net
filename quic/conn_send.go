@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -144,6 +142,10 @@ func (c *Conn) maybeSend(now time.Time) (next time.Time) {
 			}
 			if sent := c.w.finish1RTTPacket(pnum, pnumMaxAcked, dstConnID, &c.keysAppData); sent != nil {
 				c.packetSent(now, appDataSpace, sent)
+				if c.skip.shouldSkip(pnum + 1) {
+					c.loss.skipNumber(now, appDataSpace)
+					c.skip.updateNumberSkip(c)
+				}
 			}
 		}
 
@@ -372,7 +374,7 @@ func (c *Conn) appendAckFrame(now time.Time, space numberSpace) bool {
 		return false
 	}
 	d := unscaledAckDelayFromDuration(delay, ackDelayExponent)
-	return c.w.appendAckFrame(seen, d)
+	return c.w.appendAckFrame(seen, d, c.acks[space].ecn)
 }
 
 func (c *Conn) appendConnectionCloseFrame(now time.Time, space numberSpace, err error) {

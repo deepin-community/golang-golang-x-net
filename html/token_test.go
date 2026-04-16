@@ -7,7 +7,7 @@ package html
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -616,6 +616,16 @@ var tokenTests = []tokenTest{
 		`<p a/ ="">`,
 		`<p a="" =""="">`,
 	},
+	{
+		"slash at end of unquoted attribute value",
+		`<p a="\">`,
+		`<p a="\">`,
+	},
+	{
+		"self-closing tag with attribute",
+		`<p a=/>`,
+		`<p a="/">`,
+	},
 }
 
 func TestTokenizer(t *testing.T) {
@@ -680,7 +690,7 @@ tests:
 				}
 			}
 			// Anything tokenized along with untokenized input or data left in the reader.
-			assembled, err := ioutil.ReadAll(io.MultiReader(&tokenized, bytes.NewReader(z.Buffered()), r))
+			assembled, err := io.ReadAll(io.MultiReader(&tokenized, bytes.NewReader(z.Buffered()), r))
 			if err != nil {
 				t.Errorf("%s: ReadAll: %v", test.desc, err)
 				continue tests
@@ -815,6 +825,14 @@ func TestReaderEdgeCases(t *testing.T) {
 	}
 }
 
+func TestSelfClosingTagValueConfusion(t *testing.T) {
+	z := NewTokenizer(strings.NewReader(`<p a=/>`))
+	tok := z.Next()
+	if tok != StartTagToken {
+		t.Fatalf("unexpected token type: got %s, want %s", tok, StartTagToken)
+	}
+}
+
 // zeroOneByteReader is like a strings.Reader that alternates between
 // returning 0 bytes and 1 byte at a time.
 type zeroOneByteReader struct {
@@ -866,7 +884,7 @@ const (
 )
 
 func benchmarkTokenizer(b *testing.B, level int) {
-	buf, err := ioutil.ReadFile("testdata/go1.html")
+	buf, err := os.ReadFile("testdata/go1.html")
 	if err != nil {
 		b.Fatalf("could not read testdata/go1.html: %v", err)
 	}
@@ -890,7 +908,7 @@ func benchmarkTokenizer(b *testing.B, level int) {
 				// not unescape &lt; to <, or lower-case tag names and attribute keys.
 				z.Raw()
 			case lowLevel:
-				// Caling z.Text, z.TagName and z.TagAttr returns []byte values
+				// Calling z.Text, z.TagName and z.TagAttr returns []byte values
 				// whose contents may change on the next call to z.Next.
 				switch tt {
 				case TextToken, CommentToken, DoctypeToken:

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -13,9 +11,13 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
 
 func TestConnIDClientHandshake(t *testing.T) {
+	synctest.Test(t, testConnIDClientHandshake)
+}
+func testConnIDClientHandshake(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	// On initialization, the client chooses local and remote IDs.
 	//
@@ -59,6 +61,9 @@ func TestConnIDClientHandshake(t *testing.T) {
 }
 
 func TestConnIDServerHandshake(t *testing.T) {
+	synctest.Test(t, testConnIDServerHandshake)
+}
+func testConnIDServerHandshake(t *testing.T) {
 	tc := newTestConn(t, serverSide)
 	// On initialization, the server is provided with the client-chosen
 	// transient connection ID, and allocates an ID of its own.
@@ -180,6 +185,9 @@ func TestNewRandomConnID(t *testing.T) {
 }
 
 func TestConnIDPeerRequestsManyIDs(t *testing.T) {
+	synctest.Test(t, testConnIDPeerRequestsManyIDs)
+}
+func testConnIDPeerRequestsManyIDs(t *testing.T) {
 	// "An endpoint SHOULD ensure that its peer has a sufficient number
 	// of available and unused connection IDs."
 	// https://www.rfc-editor.org/rfc/rfc9000#section-5.1.1-4
@@ -222,6 +230,9 @@ func TestConnIDPeerRequestsManyIDs(t *testing.T) {
 }
 
 func TestConnIDPeerProvidesTooManyIDs(t *testing.T) {
+	synctest.Test(t, testConnIDPeerProvidesTooManyIDs)
+}
+func testConnIDPeerProvidesTooManyIDs(t *testing.T) {
 	// "An endpoint MUST NOT provide more connection IDs than the peer's limit."
 	// https://www.rfc-editor.org/rfc/rfc9000#section-5.1.1-4
 	tc := newTestConn(t, serverSide)
@@ -240,6 +251,9 @@ func TestConnIDPeerProvidesTooManyIDs(t *testing.T) {
 }
 
 func TestConnIDPeerTemporarilyExceedsActiveConnIDLimit(t *testing.T) {
+	synctest.Test(t, testConnIDPeerTemporarilyExceedsActiveConnIDLimit)
+}
+func testConnIDPeerTemporarilyExceedsActiveConnIDLimit(t *testing.T) {
 	// "An endpoint MAY send connection IDs that temporarily exceed a peer's limit
 	// if the NEW_CONNECTION_ID frame also requires the retirement of any excess [...]"
 	// https://www.rfc-editor.org/rfc/rfc9000#section-5.1.1-4
@@ -274,7 +288,7 @@ func TestConnIDPeerRetiresConnID(t *testing.T) {
 		clientSide,
 		serverSide,
 	} {
-		t.Run(side.String(), func(t *testing.T) {
+		synctestSubtest(t, side.String(), func(t *testing.T) {
 			tc := newTestConn(t, side)
 			tc.handshake()
 			tc.ignoreFrame(frameTypeAck)
@@ -295,6 +309,9 @@ func TestConnIDPeerRetiresConnID(t *testing.T) {
 }
 
 func TestConnIDPeerWithZeroLengthConnIDSendsNewConnectionID(t *testing.T) {
+	synctest.Test(t, testConnIDPeerWithZeroLengthConnIDSendsNewConnectionID)
+}
+func testConnIDPeerWithZeroLengthConnIDSendsNewConnectionID(t *testing.T) {
 	// "An endpoint that selects a zero-length connection ID during the handshake
 	// cannot issue a new connection ID."
 	// https://www.rfc-editor.org/rfc/rfc9000#section-5.1.1-8
@@ -317,6 +334,9 @@ func TestConnIDPeerWithZeroLengthConnIDSendsNewConnectionID(t *testing.T) {
 }
 
 func TestConnIDPeerRequestsRetirement(t *testing.T) {
+	synctest.Test(t, testConnIDPeerRequestsRetirement)
+}
+func testConnIDPeerRequestsRetirement(t *testing.T) {
 	// "Upon receipt of an increased Retire Prior To field, the peer MUST
 	// stop using the corresponding connection IDs and retire them with
 	// RETIRE_CONNECTION_ID frames [...]"
@@ -341,6 +361,9 @@ func TestConnIDPeerRequestsRetirement(t *testing.T) {
 }
 
 func TestConnIDPeerDoesNotAcknowledgeRetirement(t *testing.T) {
+	synctest.Test(t, testConnIDPeerDoesNotAcknowledgeRetirement)
+}
+func testConnIDPeerDoesNotAcknowledgeRetirement(t *testing.T) {
 	// "An endpoint SHOULD limit the number of connection IDs it has retired locally
 	// for which RETIRE_CONNECTION_ID frames have not yet been acknowledged."
 	// https://www.rfc-editor.org/rfc/rfc9000#section-5.1.2-6
@@ -366,6 +389,9 @@ func TestConnIDPeerDoesNotAcknowledgeRetirement(t *testing.T) {
 }
 
 func TestConnIDRepeatedNewConnectionIDFrame(t *testing.T) {
+	synctest.Test(t, testConnIDRepeatedNewConnectionIDFrame)
+}
+func testConnIDRepeatedNewConnectionIDFrame(t *testing.T) {
 	// "Receipt of the same [NEW_CONNECTION_ID] frame multiple times
 	// MUST NOT be treated as a connection error.
 	// https://www.rfc-editor.org/rfc/rfc9000#section-19.15-7
@@ -389,6 +415,9 @@ func TestConnIDRepeatedNewConnectionIDFrame(t *testing.T) {
 }
 
 func TestConnIDForSequenceNumberChanges(t *testing.T) {
+	synctest.Test(t, testConnIDForSequenceNumberChanges)
+}
+func testConnIDForSequenceNumberChanges(t *testing.T) {
 	// "[...] if a sequence number is used for different connection IDs,
 	// the endpoint MAY treat that receipt as a connection error
 	// of type PROTOCOL_VIOLATION."
@@ -417,6 +446,9 @@ func TestConnIDForSequenceNumberChanges(t *testing.T) {
 }
 
 func TestConnIDRetirePriorToAfterNewConnID(t *testing.T) {
+	synctest.Test(t, testConnIDRetirePriorToAfterNewConnID)
+}
+func testConnIDRetirePriorToAfterNewConnID(t *testing.T) {
 	// "Receiving a value in the Retire Prior To field that is greater than
 	// that in the Sequence Number field MUST be treated as a connection error
 	// of type FRAME_ENCODING_ERROR.
@@ -438,6 +470,9 @@ func TestConnIDRetirePriorToAfterNewConnID(t *testing.T) {
 }
 
 func TestConnIDAlreadyRetired(t *testing.T) {
+	synctest.Test(t, testConnIDAlreadyRetired)
+}
+func testConnIDAlreadyRetired(t *testing.T) {
 	// "An endpoint that receives a NEW_CONNECTION_ID frame with a
 	// sequence number smaller than the Retire Prior To field of a
 	// previously received NEW_CONNECTION_ID frame MUST send a
@@ -474,6 +509,9 @@ func TestConnIDAlreadyRetired(t *testing.T) {
 }
 
 func TestConnIDRepeatedRetireConnectionIDFrame(t *testing.T) {
+	synctest.Test(t, testConnIDRepeatedRetireConnectionIDFrame)
+}
+func testConnIDRepeatedRetireConnectionIDFrame(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.handshake()
 	tc.ignoreFrame(frameTypeAck)
@@ -495,6 +533,9 @@ func TestConnIDRepeatedRetireConnectionIDFrame(t *testing.T) {
 }
 
 func TestConnIDRetiredUnsent(t *testing.T) {
+	synctest.Test(t, testConnIDRetiredUnsent)
+}
+func testConnIDRetiredUnsent(t *testing.T) {
 	// "Receipt of a RETIRE_CONNECTION_ID frame containing a sequence number
 	// greater than any previously sent to the peer MUST be treated as a
 	// connection error of type PROTOCOL_VIOLATION."
@@ -514,6 +555,9 @@ func TestConnIDRetiredUnsent(t *testing.T) {
 }
 
 func TestConnIDUsePreferredAddressConnID(t *testing.T) {
+	synctest.Test(t, testConnIDUsePreferredAddressConnID)
+}
+func testConnIDUsePreferredAddressConnID(t *testing.T) {
 	// Peer gives us a connection ID in the preferred address transport parameter.
 	// We don't use the preferred address at this time, but we should use the
 	// connection ID. (It isn't tied to any specific address.)
@@ -545,6 +589,9 @@ func TestConnIDUsePreferredAddressConnID(t *testing.T) {
 }
 
 func TestConnIDPeerProvidesPreferredAddrAndTooManyConnIDs(t *testing.T) {
+	synctest.Test(t, testConnIDPeerProvidesPreferredAddrAndTooManyConnIDs)
+}
+func testConnIDPeerProvidesPreferredAddrAndTooManyConnIDs(t *testing.T) {
 	// Peer gives us more conn ids than our advertised limit,
 	// including a conn id in the preferred address transport parameter.
 	cid := testPeerConnID(10)
@@ -570,6 +617,9 @@ func TestConnIDPeerProvidesPreferredAddrAndTooManyConnIDs(t *testing.T) {
 }
 
 func TestConnIDPeerWithZeroLengthIDProvidesPreferredAddr(t *testing.T) {
+	synctest.Test(t, testConnIDPeerWithZeroLengthIDProvidesPreferredAddr)
+}
+func testConnIDPeerWithZeroLengthIDProvidesPreferredAddr(t *testing.T) {
 	// Peer gives us more conn ids than our advertised limit,
 	// including a conn id in the preferred address transport parameter.
 	tc := newTestConn(t, serverSide, func(p *transportParameters) {
@@ -598,7 +648,7 @@ func TestConnIDInitialSrcConnIDMismatch(t *testing.T) {
 	// "Endpoints MUST validate that received [initial_source_connection_id]
 	// parameters match received connection ID values."
 	// https://www.rfc-editor.org/rfc/rfc9000#section-7.3-3
-	testSides(t, "", func(t *testing.T, side connSide) {
+	testSidesSynctest(t, "", func(t *testing.T, side connSide) {
 		tc := newTestConn(t, side, func(p *transportParameters) {
 			p.initialSrcConnID = []byte("invalid")
 		})
@@ -623,7 +673,7 @@ func TestConnIDInitialSrcConnIDMismatch(t *testing.T) {
 }
 
 func TestConnIDsCleanedUpAfterClose(t *testing.T) {
-	testSides(t, "", func(t *testing.T, side connSide) {
+	testSidesSynctest(t, "", func(t *testing.T, side connSide) {
 		tc := newTestConn(t, side, func(p *transportParameters) {
 			if side == clientSide {
 				token := testPeerStatelessResetToken(0)
@@ -663,4 +713,56 @@ func TestConnIDsCleanedUpAfterClose(t *testing.T) {
 			t.Errorf("%v reset tokens in endpoint map after closing, want 0", got)
 		}
 	})
+}
+
+func TestConnIDRetiredConnIDResent(t *testing.T) {
+	synctest.Test(t, testConnIDRetiredConnIDResent)
+}
+func testConnIDRetiredConnIDResent(t *testing.T) {
+	tc := newTestConn(t, serverSide)
+	tc.handshake()
+	tc.ignoreFrame(frameTypeAck)
+	//tc.ignoreFrame(frameTypeRetireConnectionID)
+
+	// Send CID 2, retire 0-1 (negotiated during the handshake).
+	tc.writeFrames(packetType1RTT,
+		debugFrameNewConnectionID{
+			seq:           2,
+			retirePriorTo: 2,
+			connID:        testPeerConnID(2),
+			token:         testPeerStatelessResetToken(2),
+		})
+	tc.wantFrame("retire CID 0", packetType1RTT, debugFrameRetireConnectionID{seq: 0})
+	tc.wantFrame("retire CID 1", packetType1RTT, debugFrameRetireConnectionID{seq: 1})
+
+	// Send CID 3, retire 2.
+	tc.writeFrames(packetType1RTT,
+		debugFrameNewConnectionID{
+			seq:           3,
+			retirePriorTo: 3,
+			connID:        testPeerConnID(3),
+			token:         testPeerStatelessResetToken(3),
+		})
+	tc.wantFrame("retire CID 2", packetType1RTT, debugFrameRetireConnectionID{seq: 2})
+
+	// Acknowledge retirement of CIDs 0-2.
+	// The server should have state for only one CID: 3.
+	tc.writeAckForAll()
+	if got, want := len(tc.conn.connIDState.remote), 1; got != want {
+		t.Fatalf("connection has state for %v connection IDs, want %v", got, want)
+	}
+
+	// Send CID 2 again.
+	// The server should ignore this, since it's already retired the CID.
+	tc.ignoreFrames[frameTypeRetireConnectionID] = false
+	tc.writeFrames(packetType1RTT,
+		debugFrameNewConnectionID{
+			seq:    2,
+			connID: testPeerConnID(2),
+			token:  testPeerStatelessResetToken(2),
+		})
+	if got, want := len(tc.conn.connIDState.remote), 1; got != want {
+		t.Fatalf("connection has state for %v connection IDs, want %v", got, want)
+	}
+	tc.wantIdle("server does not re-retire already retired CID 2")
 }

@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/netip"
 	"time"
 )
@@ -26,6 +26,7 @@ type Conn struct {
 	testHooks connTestHooks
 	peerAddr  netip.AddrPort
 	localAddr netip.AddrPort
+	prng      *rand.Rand
 
 	msgc  chan any
 	donec chan struct{} // closed when conn loop exits
@@ -38,6 +39,7 @@ type Conn struct {
 	loss        lossState
 	streams     streamsState
 	path        pathState
+	skip        skipState
 
 	// Packet protection keys, CRYPTO streams, and TLS state.
 	keysInitial   fixedKeyPair
@@ -65,11 +67,7 @@ type Conn struct {
 // connTestHooks override conn behavior in tests.
 type connTestHooks interface {
 	// init is called after a conn is created.
-	init()
-
-	// nextMessage is called to request the next event from msgc.
-	// Used to give tests control of the connection event loop.
-	nextMessage(msgc chan any, nextTimeout time.Time) (now time.Time, message any)
+	init(first bool)
 
 	// handleTLSEvent is called with each TLS event.
 	handleTLSEvent(tls.QUICEvent)
@@ -77,13 +75,6 @@ type connTestHooks interface {
 	// newConnID is called to generate a new connection ID.
 	// Permits tests to generate consistent connection IDs rather than random ones.
 	newConnID(seq int64) ([]byte, error)
-
-	// waitUntil blocks until the until func returns true or the context is done.
-	// Used to synchronize asynchronous blocking operations in tests.
-	waitUntil(ctx context.Context, until func() bool) error
-
-	// timeNow returns the current time.
-	timeNow() time.Time
 }
 
 // newServerConnIDs is connection IDs associated with a new server connection.
@@ -100,7 +91,6 @@ func newConn(now time.Time, side connSide, cids newServerConnIDs, peerHostname s
 		endpoint:             e,
 		config:               config,
 		peerAddr:             unmapAddrPort(peerAddr),
-		msgc:                 make(chan any, 1),
 		donec:                make(chan struct{}),
 		peerAckDelayExponent: -1,
 	}
@@ -138,6 +128,14 @@ func newConn(now time.Time, side connSide, cids newServerConnIDs, peerHostname s
 		}
 	}
 
+	// A per-conn ChaCha8 PRNG is probably more than we need,
+	// but at least it's fairly small.
+	var seed [32]byte
+	if _, err := cryptorand.Read(seed[:]); err != nil {
+		panic(err)
+	}
+	c.prng = rand.New(rand.NewChaCha8(seed))
+
 	// TODO: PMTU discovery.
 	c.logConnectionStarted(cids.originalDstConnID, peerAddr)
 	c.keysAppData.init()
@@ -145,6 +143,7 @@ func newConn(now time.Time, side connSide, cids newServerConnIDs, peerHostname s
 	c.streamsInit()
 	c.lifetimeInit()
 	c.restartIdleTimer(now)
+	c.skip.init(c)
 
 	if err := c.startTLS(now, initialConnID, peerHostname, transportParameters{
 		initialSrcConnID:               c.connIDState.srcConnID(),
@@ -166,7 +165,7 @@ func newConn(now time.Time, side connSide, cids newServerConnIDs, peerHostname s
 	}
 
 	if c.testHooks != nil {
-		c.testHooks.init()
+		c.testHooks.init(true)
 	}
 	go c.loop(now)
 	return c, nil
@@ -174,6 +173,21 @@ func newConn(now time.Time, side connSide, cids newServerConnIDs, peerHostname s
 
 func (c *Conn) String() string {
 	return fmt.Sprintf("quic.Conn(%v,->%v)", c.side, c.peerAddr)
+}
+
+// LocalAddr returns the local network address, if known.
+func (c *Conn) LocalAddr() netip.AddrPort {
+	return c.localAddr
+}
+
+// RemoteAddr returns the remote network address, if known.
+func (c *Conn) RemoteAddr() netip.AddrPort {
+	return c.peerAddr
+}
+
+// ConnectionState returns basic TLS details about the connection.
+func (c *Conn) ConnectionState() tls.ConnectionState {
+	return c.tls.ConnectionState()
 }
 
 // confirmHandshake is called when the handshake is confirmed.
@@ -206,6 +220,9 @@ func (c *Conn) confirmHandshake(now time.Time) {
 // discardKeys discards unused packet protection keys.
 // https://www.rfc-editor.org/rfc/rfc9001#section-4.9
 func (c *Conn) discardKeys(now time.Time, space numberSpace) {
+	if err := c.crypto[space].discardKeys(); err != nil {
+		c.abort(now, err)
+	}
 	switch space {
 	case initialSpace:
 		c.keysInitial.discard()
@@ -270,17 +287,12 @@ func (c *Conn) loop(now time.Time) {
 	// The connection timer sends a message to the connection loop on expiry.
 	// We need to give it an expiry when creating it, so set the initial timeout to
 	// an arbitrary large value. The timer will be reset before this expires (and it
-	// isn't a problem if it does anyway). Skip creating the timer in tests which
-	// take control of the connection message loop.
-	var timer *time.Timer
+	// isn't a problem if it does anyway).
 	var lastTimeout time.Time
-	hooks := c.testHooks
-	if hooks == nil {
-		timer = time.AfterFunc(1*time.Hour, func() {
-			c.sendMsg(timerEvent{})
-		})
-		defer timer.Stop()
-	}
+	timer := time.AfterFunc(1*time.Hour, func() {
+		c.sendMsg(timerEvent{})
+	})
+	defer timer.Stop()
 
 	for c.lifetime.state != connStateDone {
 		sendTimeout := c.maybeSend(now) // try sending
@@ -297,10 +309,7 @@ func (c *Conn) loop(now time.Time) {
 		}
 
 		var m any
-		if hooks != nil {
-			// Tests only: Wait for the test to tell us to continue.
-			now, m = hooks.nextMessage(c.msgc, nextTimeout)
-		} else if !nextTimeout.IsZero() && nextTimeout.Before(now) {
+		if !nextTimeout.IsZero() && nextTimeout.Before(now) {
 			// A connection timer has expired.
 			now = time.Now()
 			m = timerEvent{}
@@ -343,6 +352,9 @@ func (c *Conn) loop(now time.Time) {
 		case func(time.Time, *Conn):
 			// Send a func to msgc to run it on the main Conn goroutine
 			m(now, c)
+		case func(now, next time.Time, _ *Conn):
+			// Send a func to msgc to run it on the main Conn goroutine
+			m(now, nextTimeout, c)
 		default:
 			panic(fmt.Sprintf("quic: unrecognized conn message %T", m))
 		}
@@ -381,31 +393,7 @@ func (c *Conn) runOnLoop(ctx context.Context, f func(now time.Time, c *Conn)) er
 		defer close(donec)
 		f(now, c)
 	}
-	if c.testHooks != nil {
-		// In tests, we can't rely on being able to send a message immediately:
-		// c.msgc might be full, and testConnHooks.nextMessage might be waiting
-		// for us to block before it processes the next message.
-		// To avoid a deadlock, we send the message in waitUntil.
-		// If msgc is empty, the message is buffered.
-		// If msgc is full, we block and let nextMessage process the queue.
-		msgc := c.msgc
-		c.testHooks.waitUntil(ctx, func() bool {
-			for {
-				select {
-				case msgc <- msg:
-					msgc = nil // send msg only once
-				case <-donec:
-					return true
-				case <-c.donec:
-					return true
-				default:
-					return false
-				}
-			}
-		})
-	} else {
-		c.sendMsg(msg)
-	}
+	c.sendMsg(msg)
 	select {
 	case <-donec:
 	case <-c.donec:
@@ -415,16 +403,6 @@ func (c *Conn) runOnLoop(ctx context.Context, f func(now time.Time, c *Conn)) er
 }
 
 func (c *Conn) waitOnDone(ctx context.Context, ch <-chan struct{}) error {
-	if c.testHooks != nil {
-		return c.testHooks.waitUntil(ctx, func() bool {
-			select {
-			case <-ch:
-				return true
-			default:
-			}
-			return false
-		})
-	}
 	// Check the channel before the context.
 	// We always prefer to return results when available,
 	// even when provided with an already-canceled context.

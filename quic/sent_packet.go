@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
 	"sync"
 	"time"
+
+	"golang.org/x/net/internal/quic/quicwire"
 )
 
 // A sentPacket tracks state related to an in-flight packet we sent,
@@ -19,10 +19,9 @@ type sentPacket struct {
 	time  time.Time // time sent
 	ptype packetType
 
+	state        sentPacketState
 	ackEliciting bool // https://www.rfc-editor.org/rfc/rfc9002.html#section-2-3.4.1
 	inFlight     bool // https://www.rfc-editor.org/rfc/rfc9002.html#section-2-3.6.1
-	acked        bool // ack has been received
-	lost         bool // packet is presumed lost
 
 	// Frames sent in the packet.
 	//
@@ -35,6 +34,15 @@ type sentPacket struct {
 	b []byte
 	n int // read offset into b
 }
+
+type sentPacketState uint8
+
+const (
+	sentPacketSent   = sentPacketState(iota) // sent but neither acked nor lost
+	sentPacketAcked                          // acked
+	sentPacketLost                           // declared lost
+	sentPacketUnsent                         // never sent
+)
 
 var sentPool = sync.Pool{
 	New: func() any {
@@ -78,12 +86,12 @@ func (sent *sentPacket) appendAckElicitingFrame(frameType byte) {
 }
 
 func (sent *sentPacket) appendInt(v uint64) {
-	sent.b = appendVarint(sent.b, v)
+	sent.b = quicwire.AppendVarint(sent.b, v)
 }
 
 func (sent *sentPacket) appendOffAndSize(start int64, size int) {
-	sent.b = appendVarint(sent.b, uint64(start))
-	sent.b = appendVarint(sent.b, uint64(size))
+	sent.b = quicwire.AppendVarint(sent.b, uint64(start))
+	sent.b = quicwire.AppendVarint(sent.b, uint64(size))
 }
 
 // The next* methods read back information about frames in the packet.
@@ -95,7 +103,7 @@ func (sent *sentPacket) next() (frameType byte) {
 }
 
 func (sent *sentPacket) nextInt() uint64 {
-	v, n := consumeVarint(sent.b[sent.n:])
+	v, n := quicwire.ConsumeVarint(sent.b[sent.n:])
 	sent.n += n
 	return v
 }

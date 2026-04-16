@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -677,7 +675,7 @@ func TestLossPTONotSetWhenLossTimerSet(t *testing.T) {
 	t.Logf("# PTO = smoothed_rtt + max(4*rttvar, 1ms)")
 	test.wantTimeout(999 * time.Millisecond)
 
-	t.Logf("# ack of packet 1 starts loss timer for 0, PTO overidden")
+	t.Logf("# ack of packet 1 starts loss timer for 0, PTO overridden")
 	test.advance(333 * time.Millisecond)
 	test.ack(initialSpace, 0*time.Millisecond, i64range[packetNumber]{1, 2})
 	test.wantAck(initialSpace, 1)
@@ -797,13 +795,35 @@ func TestLossKeysDiscarded(t *testing.T) {
 	// https://www.rfc-editor.org/rfc/rfc9002.html#section-6.4-1
 	test := newLossTest(t, clientSide, lossTestOpts{})
 	test.send(initialSpace, 0, testSentPacketSize(1200))
+	test.send(initialSpace, 1, testSentPacketSize(1200)) // will be acked
+	test.send(initialSpace, 2, testSentPacketSize(1200))
+	test.ack(initialSpace, 0*time.Millisecond, i64range[packetNumber]{1, 2})
+	test.wantAck(initialSpace, 1)
 	test.send(handshakeSpace, 0, testSentPacketSize(600))
-	test.wantVar("bytes_in_flight", 1800)
+	test.send(handshakeSpace, 1, testSentPacketSize(600)) // will be acked
+	test.send(handshakeSpace, 2, testSentPacketSize(600))
+	test.ack(handshakeSpace, 0*time.Millisecond, i64range[packetNumber]{1, 2})
+	test.wantAck(handshakeSpace, 1)
+	test.wantVar("bytes_in_flight", 1200+1200+600+600) // 3600
 
 	test.discardKeys(initialSpace)
-	test.wantVar("bytes_in_flight", 600)
+	test.wantVar("bytes_in_flight", 600+600) // 1200
 
 	test.discardKeys(handshakeSpace)
+	test.wantVar("bytes_in_flight", 0)
+}
+
+func TestLossDiscardPackets(t *testing.T) {
+	test := newLossTest(t, clientSide, lossTestOpts{})
+	test.send(initialSpace, 0, testSentPacketSize(1200))
+	test.send(initialSpace, 1, testSentPacketSize(1200)) // will be acked
+	test.send(initialSpace, 2, testSentPacketSize(1200))
+	test.ack(initialSpace, 0*time.Millisecond, i64range[packetNumber]{1, 2})
+	test.wantAck(initialSpace, 1)
+
+	test.discardPackets(initialSpace)
+	test.wantLoss(initialSpace, 0)
+	test.wantLoss(initialSpace, 2)
 	test.wantVar("bytes_in_flight", 0)
 }
 
@@ -1492,6 +1512,13 @@ func (c *lossTest) discardKeys(spaceID numberSpace) {
 	c.checkUnexpectedEvents()
 	c.t.Logf("discard %s keys", spaceID)
 	c.c.discardKeys(c.now, nil, spaceID)
+}
+
+func (c *lossTest) discardPackets(spaceID numberSpace) {
+	c.t.Helper()
+	c.checkUnexpectedEvents()
+	c.t.Logf("discard packets in %s", spaceID)
+	c.c.discardPackets(spaceID, nil, c.onAckOrLoss)
 }
 
 func (c *lossTest) setMaxAckDelay(d time.Duration) {

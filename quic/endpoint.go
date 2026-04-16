@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -38,7 +36,6 @@ type Endpoint struct {
 }
 
 type endpointTestHooks interface {
-	timeNow() time.Time
 	newConn(c *Conn)
 }
 
@@ -71,6 +68,25 @@ func Listen(network, address string, listenConfig *Config) (*Endpoint, error) {
 		return nil, err
 	}
 	return newEndpoint(pc, listenConfig, nil)
+}
+
+// NewEndpoint creates an endpoint using a net.PacketConn as the underlying transport.
+//
+// If the PacketConn is not a *net.UDPConn, the endpoint may be slower and lack
+// access to some features of the network.
+func NewEndpoint(conn net.PacketConn, config *Config) (*Endpoint, error) {
+	var pc packetConn
+	var err error
+	switch conn := conn.(type) {
+	case *net.UDPConn:
+		pc, err = newNetUDPConn(conn)
+	default:
+		pc, err = newNetPacketConn(conn)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return newEndpoint(pc, config, nil)
 }
 
 func newEndpoint(pc packetConn, config *Config, hooks endpointTestHooks) (*Endpoint, error) {
@@ -143,7 +159,7 @@ func (e *Endpoint) Close(ctx context.Context) error {
 
 // Accept waits for and returns the next connection.
 func (e *Endpoint) Accept(ctx context.Context) (*Conn, error) {
-	return e.acceptQueue.get(ctx, nil)
+	return e.acceptQueue.get(ctx)
 }
 
 // Dial creates and returns a connection to a network address.
@@ -252,12 +268,7 @@ func (e *Endpoint) handleUnknownDestinationDatagram(m *datagram) {
 	if len(m.b) < minimumValidPacketSize {
 		return
 	}
-	var now time.Time
-	if e.testHooks != nil {
-		now = e.testHooks.timeNow()
-	} else {
-		now = time.Now()
-	}
+	now := time.Now()
 	// Check to see if this is a stateless reset.
 	var token statelessResetToken
 	copy(token[:], m.b[len(m.b)-len(token):])
@@ -448,7 +459,7 @@ func (m *connsMap) updateConnIDs(f func(*connsMap)) {
 	m.updateNeeded.Store(true)
 }
 
-// applyConnIDUpdates is called by the datagram receive loop to update its connection ID map.
+// applyUpdates is called by the datagram receive loop to update its connection ID map.
 func (m *connsMap) applyUpdates() {
 	m.updateMu.Lock()
 	defer m.updateMu.Unlock()

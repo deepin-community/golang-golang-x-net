@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -11,12 +9,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 // handshake executes the handshake.
 func (tc *testConn) handshake() {
-	tc.t.Helper()
 	if *testVV {
 		*testVV = false
 		defer func() {
@@ -34,16 +32,16 @@ func (tc *testConn) handshake() {
 	i := 0
 	for {
 		if i == len(dgrams)-1 {
+			want := time.Now().Add(maxAckDelay - timerGranularity)
 			if tc.conn.side == clientSide {
-				want := tc.endpoint.now.Add(maxAckDelay - timerGranularity)
-				if !tc.timer.Equal(want) {
-					t.Fatalf("want timer = %v (max_ack_delay), got %v", want, tc.timer)
+				if got := tc.nextEvent(); !got.Equal(want) {
+					t.Fatalf("want timer = %v (max_ack_delay), got %v", want, got)
 				}
 				if got := tc.readDatagram(); got != nil {
 					t.Fatalf("client unexpectedly sent: %v", got)
 				}
 			}
-			tc.advance(maxAckDelay)
+			time.Sleep(time.Until(want))
 		}
 
 		// Check that we're sending exactly the data we expect.
@@ -211,7 +209,7 @@ func handshakeDatagrams(tc *testConn) (dgrams []*testDatagram) {
 			frames: []debugFrame{
 				debugFrameAck{
 					ackDelay: unscaledAckDelayFromDuration(
-						maxAckDelay, ackDelayExponent),
+						maxAckDelay-timerGranularity, ackDelayExponent),
 					ranges: []i64range[packetNumber]{{0, 2}},
 				},
 			},
@@ -310,20 +308,29 @@ func (tc *testConn) uncheckedHandshake() {
 }
 
 func TestConnClientHandshake(t *testing.T) {
+	synctest.Test(t, testConnClientHandshake)
+}
+func testConnClientHandshake(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.handshake()
-	tc.advance(1 * time.Second)
+	time.Sleep(1 * time.Second)
 	tc.wantIdle("no packets should be sent by an idle conn after the handshake")
 }
 
 func TestConnServerHandshake(t *testing.T) {
+	synctest.Test(t, testConnServerHandshake)
+}
+func testConnServerHandshake(t *testing.T) {
 	tc := newTestConn(t, serverSide)
 	tc.handshake()
-	tc.advance(1 * time.Second)
+	time.Sleep(1 * time.Second)
 	tc.wantIdle("no packets should be sent by an idle conn after the handshake")
 }
 
 func TestConnKeysDiscardedClient(t *testing.T) {
+	synctest.Test(t, testConnKeysDiscardedClient)
+}
+func testConnKeysDiscardedClient(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.ignoreFrame(frameTypeAck)
 
@@ -372,6 +379,9 @@ func TestConnKeysDiscardedClient(t *testing.T) {
 }
 
 func TestConnKeysDiscardedServer(t *testing.T) {
+	synctest.Test(t, testConnKeysDiscardedServer)
+}
+func testConnKeysDiscardedServer(t *testing.T) {
 	tc := newTestConn(t, serverSide)
 	tc.ignoreFrame(frameTypeAck)
 
@@ -427,6 +437,9 @@ func TestConnKeysDiscardedServer(t *testing.T) {
 }
 
 func TestConnInvalidCryptoData(t *testing.T) {
+	synctest.Test(t, testConnInvalidCryptoData)
+}
+func testConnInvalidCryptoData(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.ignoreFrame(frameTypeAck)
 
@@ -457,6 +470,9 @@ func TestConnInvalidCryptoData(t *testing.T) {
 }
 
 func TestConnInvalidPeerCertificate(t *testing.T) {
+	synctest.Test(t, testConnInvalidPeerCertificate)
+}
+func testConnInvalidPeerCertificate(t *testing.T) {
 	tc := newTestConn(t, clientSide, func(c *tls.Config) {
 		c.VerifyPeerCertificate = func([][]byte, [][]*x509.Certificate) error {
 			return errors.New("I will not buy this certificate. It is scratched.")
@@ -483,6 +499,9 @@ func TestConnInvalidPeerCertificate(t *testing.T) {
 }
 
 func TestConnHandshakeDoneSentToServer(t *testing.T) {
+	synctest.Test(t, testConnHandshakeDoneSentToServer)
+}
+func testConnHandshakeDoneSentToServer(t *testing.T) {
 	tc := newTestConn(t, serverSide)
 	tc.handshake()
 
@@ -495,6 +514,9 @@ func TestConnHandshakeDoneSentToServer(t *testing.T) {
 }
 
 func TestConnCryptoDataOutOfOrder(t *testing.T) {
+	synctest.Test(t, testConnCryptoDataOutOfOrder)
+}
+func testConnCryptoDataOutOfOrder(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.ignoreFrame(frameTypeAck)
 
@@ -533,6 +555,9 @@ func TestConnCryptoDataOutOfOrder(t *testing.T) {
 }
 
 func TestConnCryptoBufferSizeExceeded(t *testing.T) {
+	synctest.Test(t, testConnCryptoBufferSizeExceeded)
+}
+func testConnCryptoBufferSizeExceeded(t *testing.T) {
 	tc := newTestConn(t, clientSide)
 	tc.ignoreFrame(frameTypeAck)
 
@@ -552,6 +577,9 @@ func TestConnCryptoBufferSizeExceeded(t *testing.T) {
 }
 
 func TestConnAEADLimitReached(t *testing.T) {
+	synctest.Test(t, testConnAEADLimitReached)
+}
+func testConnAEADLimitReached(t *testing.T) {
 	// "[...] endpoints MUST count the number of received packets that
 	// fail authentication during the lifetime of a connection.
 	// If the total number of received packets that fail authentication [...]
@@ -592,7 +620,7 @@ func TestConnAEADLimitReached(t *testing.T) {
 		tc.conn.sendMsg(&datagram{
 			b: invalid,
 		})
-		tc.wait()
+		synctest.Wait()
 	}
 
 	// Set the conn's auth failure count to just before the AEAD integrity limit.
@@ -612,6 +640,38 @@ func TestConnAEADLimitReached(t *testing.T) {
 		})
 
 	tc.writeFrames(packetType1RTT, debugFramePing{})
-	tc.advance(1 * time.Second)
+	time.Sleep(1 * time.Second)
 	tc.wantIdle("auth failures at limit: conn does not process additional packets")
+}
+
+func TestConnKeysDiscardedWithExcessCryptoData(t *testing.T) {
+	synctest.Test(t, testConnKeysDiscardedWithExcessCryptoData)
+}
+func testConnKeysDiscardedWithExcessCryptoData(t *testing.T) {
+	tc := newTestConn(t, serverSide, permissiveTransportParameters)
+	tc.ignoreFrame(frameTypeAck)
+	tc.ignoreFrame(frameTypeNewConnectionID)
+	tc.ignoreFrame(frameTypeCrypto)
+
+	// One byte of excess CRYPTO data, separated from the valid data by a one-byte gap.
+	tc.writeFrames(packetTypeInitial,
+		debugFrameCrypto{
+			off:  int64(len(tc.cryptoDataIn[tls.QUICEncryptionLevelInitial]) + 1),
+			data: []byte{0},
+		})
+	tc.writeFrames(packetTypeInitial,
+		debugFrameCrypto{
+			data: tc.cryptoDataIn[tls.QUICEncryptionLevelInitial],
+		})
+
+	// We don't drop the Initial keys and discover the excess data until the client
+	// sends a Handshake packet.
+	tc.writeFrames(packetTypeHandshake,
+		debugFrameCrypto{
+			data: tc.cryptoDataIn[tls.QUICEncryptionLevelHandshake],
+		})
+	tc.wantFrame("connection closed due to excess Initial CRYPTO data",
+		packetType1RTT, debugFrameConnectionCloseTransport{
+			code: errTLSBase + 10,
+		})
 }

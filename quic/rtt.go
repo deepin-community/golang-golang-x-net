@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -37,7 +35,7 @@ func (r *rttState) establishPersistentCongestion() {
 	r.minRTT = r.latestRTT
 }
 
-// updateRTTSample is called when we generate a new RTT sample.
+// updateSample is called when we generate a new RTT sample.
 // https://www.rfc-editor.org/rfc/rfc9002.html#section-5
 func (r *rttState) updateSample(now time.Time, handshakeConfirmed bool, spaceID numberSpace, latestRTT, ackDelay, maxAckDelay time.Duration) {
 	r.latestRTT = latestRTT

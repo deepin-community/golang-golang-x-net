@@ -21,7 +21,7 @@
 //
 // A [Stream] is a QUIC stream, an ordered, reliable byte stream.
 //
-// # Cancelation
+// # Cancellation
 //
 // All blocking operations may be canceled using a context.Context.
 // When performing an operation with a canceled context, the operation
@@ -42,4 +42,9 @@
 //   - Stream send/receive windows are configurable,
 //     but are fixed and do not adapt to available throughput.
 //   - Path MTU discovery is not implemented.
+//
+// # Security Policy
+//
+// This package is a work in progress,
+// and not yet covered by the Go security policy.
 package quic

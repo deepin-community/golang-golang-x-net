@@ -19,7 +19,11 @@ execute_after_dh_auto_configure:
 
 override_dh_auto_test:
 	# Some tests require root, need -short to skip them for now.
-	dh_auto_test -O--buildsystem=golang -- -short
+	# Disable tests required network connection
+	dh_auto_test -O--buildsystem=golang -- -short -test.skip="\
+	TestTestClientConn|\
+	TestConfigTransportParameters|\
+	"
 
 override_dh_gencontrol:
 	dh_gencontrol -v -- -Vmy:Built-Using="$(shell dpkg-query --show -f '$${source:Package} (=$${source:Version}),' publicsuffix)"

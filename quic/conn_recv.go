@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build go1.21
-
 package quic
 
 import (
@@ -126,7 +124,7 @@ func (c *Conn) handleLongHeader(now time.Time, dgram *datagram, ptype packetType
 	}
 	c.connIDState.handlePacket(c, p.ptype, p.srcConnID)
 	ackEliciting := c.handleFrames(now, dgram, ptype, space, p.payload)
-	c.acks[space].receive(now, space, p.num, ackEliciting)
+	c.acks[space].receive(now, space, p.num, ackEliciting, dgram.ecn)
 	if p.ptype == packetTypeHandshake && c.side == serverSide {
 		c.loss.validateClientAddress()
 
@@ -149,7 +147,7 @@ func (c *Conn) handle1RTT(now time.Time, dgram *datagram, buf []byte) int {
 	p, err := parse1RTTPacket(buf, &c.keysAppData, connIDLen, pnumMax)
 	if err != nil {
 		// A localTransportError terminates the connection.
-		// Other errors indicate an unparseable packet, but otherwise may be ignored.
+		// Other errors indicate an unparsable packet, but otherwise may be ignored.
 		if _, ok := err.(localTransportError); ok {
 			c.abort(now, err)
 		}
@@ -176,7 +174,7 @@ func (c *Conn) handle1RTT(now time.Time, dgram *datagram, buf []byte) int {
 		c.log1RTTPacketReceived(p, buf)
 	}
 	ackEliciting := c.handleFrames(now, dgram, packetType1RTT, appDataSpace, p.payload)
-	c.acks[appDataSpace].receive(now, appDataSpace, p.num, ackEliciting)
+	c.acks[appDataSpace].receive(now, appDataSpace, p.num, ackEliciting, dgram.ecn)
 	return len(buf)
 }
 
@@ -210,10 +208,14 @@ func (c *Conn) handleRetry(now time.Time, pkt []byte) {
 	}
 	c.retryToken = cloneBytes(p.token)
 	c.connIDState.handleRetryPacket(p.srcConnID)
+	c.keysInitial = initialKeys(p.srcConnID, c.side)
 	// We need to resend any data we've already sent in Initial packets.
 	// We must not reuse already sent packet numbers.
 	c.loss.discardPackets(initialSpace, c.log, c.handleAckOrLoss)
 	// TODO: Discard 0-RTT packets as well, once we support 0-RTT.
+	if c.testHooks != nil {
+		c.testHooks.init(false)
+	}
 }
 
 var errVersionNegotiation = errors.New("server does not support QUIC version 1")
@@ -285,6 +287,7 @@ func (c *Conn) handleFrames(now time.Time, dgram *datagram, ptype packetType, sp
 		__01 = packetType0RTT | packetType1RTT
 		___1 = packetType1RTT
 	)
+	hasCrypto := false
 	for len(payload) > 0 {
 		switch payload[0] {
 		case frameTypePadding, frameTypeAck, frameTypeAckECN,
@@ -322,6 +325,7 @@ func (c *Conn) handleFrames(now time.Time, dgram *datagram, ptype packetType, sp
 			if !frameOK(c, ptype, IH_1) {
 				return
 			}
+			hasCrypto = true
 			n = c.handleCryptoFrame(now, space, payload)
 		case frameTypeNewToken:
 			if !frameOK(c, ptype, ___1) {
@@ -406,22 +410,29 @@ func (c *Conn) handleFrames(now time.Time, dgram *datagram, ptype packetType, sp
 		}
 		payload = payload[n:]
 	}
+	if hasCrypto {
+		// Process TLS events after handling all frames in a packet.
+		// TLS events can cause us to drop state for a number space,
+		// so do that last, to avoid handling frames differently
+		// depending on whether they come before or after a CRYPTO frame.
+		if err := c.handleTLSEvents(now); err != nil {
+			c.abort(now, err)
+		}
+	}
 	return ackEliciting
 }
 
 func (c *Conn) handleAckFrame(now time.Time, space numberSpace, payload []byte) int {
 	c.loss.receiveAckStart()
-	largest, ackDelay, n := consumeAckFrame(payload, func(rangeIndex int, start, end packetNumber) {
-		if end > c.loss.nextNumber(space) {
-			// Acknowledgement of a packet we never sent.
-			c.abort(now, localTransportError{
-				code:   errProtocolViolation,
-				reason: "acknowledgement for unsent packet",
-			})
+	largest, ackDelay, ecn, n := consumeAckFrame(payload, func(rangeIndex int, start, end packetNumber) {
+		if err := c.loss.receiveAckRange(now, space, rangeIndex, start, end, c.handleAckOrLoss); err != nil {
+			c.abort(now, err)
 			return
 		}
-		c.loss.receiveAckRange(now, space, rangeIndex, start, end, c.handleAckOrLoss)
 	})
+	// TODO: Make use of ECN feedback.
+	// https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2
+	_ = ecn
 	// Prior to receiving the peer's transport parameters, we cannot
 	// interpret the ACK Delay field because we don't know the ack_delay_exponent
 	// to apply.
