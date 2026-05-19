@@ -1,3 +1,5 @@
 publicsuffix.patch
 0001-replaced-the-slices-module-with-the-clone-method.patch
 0001-feat-add-sw-support.patch
+CVE-2024-45338.patch
+CVE-2025-22872.patch
