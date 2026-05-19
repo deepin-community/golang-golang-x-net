@@ -1,3 +1,12 @@
+golang-golang-x-net (1:0.25.0+dfsg-1deepin3) unstable; urgency=medium
+
+  * Fix CVE-2024-45338: html: use strings.EqualFold instead of lowering
+    ourselves, preventing DoS from non-linear parsing of case-insensitive
+    content (upstream CL 637536).
+  * Fix CVE-2025-22872: html: properly handle trailing solidus in unquoted
+    attribute value in foreign content (upstream CL 661256).
+
+ -- deepin-ci-robot <packages@deepin.org>  Mon, 19 May 2026 16:00:00 +0800
 golang-golang-x-net (1:0.25.0+dfsg-1deepin2) unstable; urgency=medium
 
   * feat: add sw64 support
